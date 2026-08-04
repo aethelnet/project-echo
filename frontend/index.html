@@ -10,29 +10,37 @@
     <style>
         body {
             font-family: 'Outfit', sans-serif;
-            background-color: #f4f4f5;
-            color: #18181b;
+            background: radial-gradient(circle at 50% 0%, #1a1a24 0%, #09090b 100%);
+            color: #f4f4f5;
             overflow: hidden;
+            margin: 0;
         }
         .glass-panel {
-            background: rgba(255, 255, 255, 0.85);
-            backdrop-filter: blur(12px);
-            border: 1px solid rgba(0, 0, 0, 0.1);
-            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            background: rgba(20, 20, 24, 0.65);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(212, 175, 55, 0.15);
+            box-shadow: 0 30px 60px -12px rgba(0, 0, 0, 0.8), inset 0 1px 0 rgba(255,255,255,0.05);
+            transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+        .glass-panel:hover {
+            border-color: rgba(212, 175, 55, 0.3);
+            box-shadow: 0 30px 60px -12px rgba(0, 0, 0, 0.9), 0 0 40px rgba(212, 175, 55, 0.1);
         }
         .accent-glow {
-            box-shadow: 0 0 20px rgba(212, 175, 55, 0.3);
+            box-shadow: 0 0 20px rgba(212, 175, 55, 0.4);
         }
         .node text {
             pointer-events: none;
-            font-size: 13px;
-            font-weight: 400;
-            fill: #ffffff;
-            text-shadow: 0px 2px 4px rgba(0,0,0,0.8);
+            font-size: 14px;
+            font-weight: 300;
+            fill: #e4e4e7;
+            text-shadow: 0px 2px 10px rgba(0,0,0,1);
+            letter-spacing: 0.5px;
         }
         .link {
-            stroke: #cbd5e1;
-            stroke-opacity: 0.6;
+            stroke: #3f3f46;
+            stroke-opacity: 0.4;
         }
         #graph-container {
             width: 100%;
@@ -41,11 +49,30 @@
             top: 0;
             left: 0;
             z-index: 0;
+            mix-blend-mode: screen;
         }
         .ui-layer {
             position: relative;
             z-index: 10;
         }
+        .search-btn {
+            background: linear-gradient(135deg, #D4AF37 0%, #AA771C 100%);
+            color: #000;
+            transition: all 0.3s ease;
+        }
+        .search-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px -10px rgba(212, 175, 55, 0.6);
+            filter: brightness(1.1);
+        }
+        input::placeholder {
+            color: #71717a !important;
+        }
+        /* Custom Scrollbar for dark mode */
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: rgba(0,0,0,0.2); border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(212, 175, 55, 0.3); border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(212, 175, 55, 0.6); }
     </style>
 </head>
 <body class="h-screen w-screen flex flex-col items-center justify-center relative">
@@ -58,13 +85,13 @@
         
         <div class="glass-panel p-8 rounded-3xl w-full flex flex-col items-center transition-all duration-700" id="search-box">
             <h1 class="text-4xl font-semibold mb-2 tracking-wide text-transparent bg-clip-text bg-gradient-to-r from-[#D4AF37] to-[#E53E3E]">Project Echo</h1>
-            <p class="text-sm text-gray-600 mb-8 text-center max-w-md">
-                Algorithmic restitution framework. Cross-referencing colonial archives, flight routes, and oral histories to reconstruct stolen heritage.
+            <p class="text-sm text-gray-400 mb-8 text-center max-w-md leading-relaxed">
+                Algorithmic restitution framework. Cross-referencing colonial archives, flight routes, and oral histories to reconstruct stolen heritage using PyTorch LGNNs.
             </p>
 
-            <div class="w-full flex bg-white rounded-full border border-gray-200 overflow-hidden focus-within:border-[#D4AF37] transition-colors">
-                <input type="text" id="query-input" placeholder="Enter name, artifact, or region (e.g. 'Benin Bronze', 'Mwangi')" class="w-full bg-transparent px-6 py-4 outline-none text-gray-900 placeholder-gray-500">
-                <button onclick="runTrace()" class="px-8 bg-gradient-to-r from-[#D4AF37] to-[#B7791F] text-black font-semibold hover:opacity-90 transition-opacity">
+            <div class="w-full flex bg-black/40 rounded-full border border-gray-800 overflow-hidden focus-within:border-[#D4AF37] focus-within:shadow-[0_0_15px_rgba(212,175,55,0.2)] transition-all duration-300">
+                <input type="text" id="query-input" placeholder="Enter name, artifact, or region (e.g. 'Benin Bronze')" class="w-full bg-transparent px-6 py-4 outline-none text-gray-100 placeholder-gray-600 font-light tracking-wide">
+                <button onclick="runTrace()" class="search-btn px-10 font-bold tracking-widest text-sm uppercase">
                     TRACE
                 </button>
             </div>
@@ -72,9 +99,12 @@
 
         <!-- Results Card (Hidden by default) -->
         <div id="results-card" class="glass-panel mt-6 p-6 rounded-2xl w-full opacity-0 pointer-events-none transform translate-y-4 transition-all duration-700 max-h-[60vh] overflow-y-auto custom-scrollbar">
-            <div class="flex items-center justify-between mb-4 sticky top-0 bg-white/90 backdrop-blur-md pb-2 z-10 border-b border-gray-200">
-                <h3 class="text-xl font-semibold text-gray-900">LGNN Topology Matches</h3>
-                <span class="px-3 py-1 bg-green-900/50 text-green-400 rounded-full text-xs font-semibold border border-green-800" id="match-count">Scanning...</span>
+            <div class="flex items-center justify-between mb-6 sticky top-0 bg-[#121217]/90 backdrop-blur-md pb-4 pt-2 z-10 border-b border-gray-800">
+                <h3 class="text-xl font-semibold text-gray-100 flex items-center gap-3">
+                    <span class="w-2 h-2 rounded-full bg-[#D4AF37] animate-pulse"></span>
+                    LGNN Topology Matches
+                </h3>
+                <span class="px-4 py-1.5 bg-[#D4AF37]/10 text-[#D4AF37] rounded-full text-xs font-bold border border-[#D4AF37]/30 tracking-wider shadow-[0_0_10px_rgba(212,175,55,0.2)]" id="match-count">STANDBY</span>
             </div>
             
             <!-- Dynamic Results Container -->
@@ -82,7 +112,7 @@
                 <!-- Results injected here -->
             </div>
             
-            <button onclick="resetView()" class="mt-6 text-sm text-[#D4AF37] hover:underline sticky bottom-0 bg-white/90 w-full text-left pt-2 pb-1 z-10">Reset Trace</button>
+            <button onclick="resetView()" class="mt-6 text-sm text-[#D4AF37] hover:text-white transition-colors sticky bottom-0 bg-gradient-to-t from-[#121217] via-[#121217]/90 to-transparent w-full text-center py-4 z-10 font-medium tracking-wide">INITIALIZE NEW TRACE</button>
         </div>
     </div>
 
