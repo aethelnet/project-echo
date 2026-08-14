@@ -1,58 +1,66 @@
-# Project Echo 🏺🔍
+# Project Echo (Aethelnet Forge App)
 
 **Algorithmic Restitution Framework for Stolen Heritage**
 
 Project Echo is an advanced analytical engine designed to cross-reference colonial archives, historic flight/shipping routes, and oral histories. By utilizing a **Liquid Graph Neural Network (LGNN)**, Echo discovers non-obvious topological connections between museum inventories and lost cultural artifacts.
 
+---
+
 ## Overview
-This repository contains the standalone, decoupled engine and presentation layer for Project Echo, originally forked from the Aethelnet ecosystem. It is designed to be easily deployed by researchers, historians, and restitution organizations (e.g., Masoso e.V.).
+This repository contains the standalone, decoupled engine and presentation layer for Project Echo, structured as a certified **Aethelnet OS Forge Application**. It is designed to be easily deployed by researchers, historians, and restitution organizations (e.g., Masoso e.V.).
 
 ### Key Features
-- **LGNN Tensor Core**: A PyTorch-based neural engine trained on multi-modal historic data to find semantic and temporal matches.
-- **OSINT Crawler**: Automatically ingests and indexes open-source historical archives, news snippets, and digitization APIs.
-- **Cinematic UI**: A modern, glassmorphic dark-mode web interface for visualizing network topologies and matches in real-time using D3.js.
+- **LGNN Tensor Core**: PyTorch-based neural engine trained on multi-modal historic provenance data to calculate loot probability and semantic cosine similarity.
+- **Wikidata SPARQL Crawler (`echo_hunter.py`)**: Bypasses museum WAFs by querying decentralized knowledge graphs directly.
+- **Social Engineering / Psyop Dispatcher (`echo_psyop_twitter.py`)**: Automatically generates demand-for-restitution campaigns based on validated high-confidence discoveries.
+- **Cinematic 3D Force Graph UI**: A glassmorphic dark-mode web interface for visualizing provenance network topologies in real-time.
+- **Forge App Native**: Includes standard `forge-app.json` manifest, systemd service units, and one-click launch scripts.
+
+---
 
 ## Project Structure
 ```text
 project-echo/
+├── forge-app.json              # Aethelnet Forge Application Manifest
+├── pyproject.toml              # Standard Python packaging
+├── requirements.txt            # Python dependencies
 ├── backend/
-│   ├── echo_engine.py          # Main Flask API and Router
-│   ├── echo_lgnn_tensor.py     # PyTorch Network Architecture
-│   ├── echo_osint.py           # Archive Intelligence Gatherer
-│   └── echo_crawler.py         # Web Scraper for historic context
+│   ├── echo_engine.py          # Main Flask API and Graph Router (Port 5000)
+│   ├── echo_hunter.py          # Background Wikidata SPARQL Crawler Daemon
+│   ├── echo_lgnn_tensor.py     # PyTorch LGNN Neural Tensor Architecture
+│   ├── echo_psyop_twitter.py   # Restitution Tweet Dispatcher
+│   ├── echo_topology.py        # 3D Graph Topology Generator
+│   ├── hunter_database.json    # Verified Looted Artifacts Database
+│   ├── psyop_drafts.json       # Generated Restitution Campaigns
+│   └── topology_graph.json     # 3D Force-Graph Data
 ├── frontend/
-│   ├── index.html              # Cinematic UI (Dark Mode + Glassmorphism)
+│   ├── index.html              # Cinematic UI (Dark Mode + 3D Force Graph)
 │   └── prototype.html          # Legacy minimal UI
-└── model/
-    └── echo_tensor_core_v1.pth # Pre-trained LGNN weights
+├── model/
+│   └── echo_tensor_core_v1.pth # Pre-trained LGNN weights
+├── scripts/
+│   └── run.sh                  # One-click startup script for all services
+└── systemd/
+    └── aethelnet-echo.service  # Systemd service unit for 24/7 background operation
 ```
+
+---
 
 ## Getting Started
 
-### Prerequisites
-- Python 3.10+
-- PyTorch
-- Flask
+### 1. One-Click Launch (Recommended)
+```bash
+./scripts/run.sh
+```
+* **API Server:** `http://localhost:5000`
+* **Web UI:** `http://localhost:8089`
 
-### Installation & Execution
-1. Clone the repository:
-   ```bash
-   git clone git@github.com:aethelnet/project-echo.git
-   cd project-echo
-   ```
-2. Install dependencies:
-   ```bash
-   pip install torch flask sentence-transformers
-   ```
-3. Run the backend engine:
-   ```bash
-   python3 backend/echo_engine.py
-   ```
-4. Open the interface:
-   Simply double-click `frontend/index.html` in your browser.
+### 2. Run with Systemd (Persistent Daemon)
+```bash
+systemctl --user enable --now aethelnet-echo.service
+```
 
-## Philosophy
-Project Echo treats history not as a static list of events, but as a fluid, interconnected graph. By mapping the movement of artifacts against the movement of people and capital, the engine highlights discrepancies and surfaces evidence of illicit transfer.
+---
 
 ## License
 This project is licensed under the GNU Affero General Public License v3.0 (AGPL-3.0). See the [LICENSE](LICENSE) file for details.

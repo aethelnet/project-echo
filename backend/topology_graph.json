@@ -1,0 +1,202 @@
+{
+    "nodes": [
+        {
+            "id": "hub_echo",
+            "name": "Project Echo Core",
+            "group": 0,
+            "color": "#ffffff",
+            "val": 30
+        },
+        {
+            "id": "art_329077",
+            "name": "Head of a ruler",
+            "group": 1,
+            "color": "#ff003c",
+            "val": 10
+        },
+        {
+            "id": "repo_5812640316136142274",
+            "name": "Unknown Repository",
+            "group": 2,
+            "color": "#1da1f2",
+            "val": 20
+        },
+        {
+            "id": "prov_8223028867212807233",
+            "name": "Unknown Origin",
+            "group": 3,
+            "color": "#ffa500",
+            "val": 15
+        },
+        {
+            "id": "art_437422",
+            "name": "Charity",
+            "group": 1,
+            "color": "#ff003c",
+            "val": 10
+        },
+        {
+            "id": "art_729644",
+            "name": "In proof of true love, a watercarrier skeleton arguing with a woman (Posada); two skeleton angels in upper corners (Manilla)",
+            "group": 1,
+            "color": "#ff003c",
+            "val": 10
+        },
+        {
+            "id": "art_312427",
+            "name": "Lion Ornament",
+            "group": 1,
+            "color": "#ff003c",
+            "val": 10
+        },
+        {
+            "id": "art_312428",
+            "name": "Lion Ornament",
+            "group": 1,
+            "color": "#ff003c",
+            "val": 10
+        },
+        {
+            "id": "art_472562",
+            "name": "The Fieschi Morgan Staurotheke",
+            "group": 1,
+            "color": "#ff7300",
+            "val": 10
+        },
+        {
+            "id": "art_318622",
+            "name": "Pendant mask of \u00ccy\u1ecd\u0301b\u00e0 Idi\u00e0",
+            "group": 1,
+            "color": "#ff7300",
+            "val": 10
+        }
+    ],
+    "links": [
+        {
+            "source": "art_329077",
+            "target": "repo_5812640316136142274",
+            "name": "HOUSED_IN",
+            "color": "#1da1f2"
+        },
+        {
+            "source": "art_329077",
+            "target": "prov_8223028867212807233",
+            "name": "LOOTED_FROM",
+            "color": "#ffa500"
+        },
+        {
+            "source": "hub_echo",
+            "target": "art_329077",
+            "name": "IDENTIFIED",
+            "color": "rgba(255,255,255,0.2)"
+        },
+        {
+            "source": "art_437422",
+            "target": "repo_5812640316136142274",
+            "name": "HOUSED_IN",
+            "color": "#1da1f2"
+        },
+        {
+            "source": "art_437422",
+            "target": "prov_8223028867212807233",
+            "name": "LOOTED_FROM",
+            "color": "#ffa500"
+        },
+        {
+            "source": "hub_echo",
+            "target": "art_437422",
+            "name": "IDENTIFIED",
+            "color": "rgba(255,255,255,0.2)"
+        },
+        {
+            "source": "art_729644",
+            "target": "repo_5812640316136142274",
+            "name": "HOUSED_IN",
+            "color": "#1da1f2"
+        },
+        {
+            "source": "art_729644",
+            "target": "prov_8223028867212807233",
+            "name": "LOOTED_FROM",
+            "color": "#ffa500"
+        },
+        {
+            "source": "hub_echo",
+            "target": "art_729644",
+            "name": "IDENTIFIED",
+            "color": "rgba(255,255,255,0.2)"
+        },
+        {
+            "source": "art_312427",
+            "target": "repo_5812640316136142274",
+            "name": "HOUSED_IN",
+            "color": "#1da1f2"
+        },
+        {
+            "source": "art_312427",
+            "target": "prov_8223028867212807233",
+            "name": "LOOTED_FROM",
+            "color": "#ffa500"
+        },
+        {
+            "source": "hub_echo",
+            "target": "art_312427",
+            "name": "IDENTIFIED",
+            "color": "rgba(255,255,255,0.2)"
+        },
+        {
+            "source": "art_312428",
+            "target": "repo_5812640316136142274",
+            "name": "HOUSED_IN",
+            "color": "#1da1f2"
+        },
+        {
+            "source": "art_312428",
+            "target": "prov_8223028867212807233",
+            "name": "LOOTED_FROM",
+            "color": "#ffa500"
+        },
+        {
+            "source": "hub_echo",
+            "target": "art_312428",
+            "name": "IDENTIFIED",
+            "color": "rgba(255,255,255,0.2)"
+        },
+        {
+            "source": "art_472562",
+            "target": "repo_5812640316136142274",
+            "name": "HOUSED_IN",
+            "color": "#1da1f2"
+        },
+        {
+            "source": "art_472562",
+            "target": "prov_8223028867212807233",
+            "name": "LOOTED_FROM",
+            "color": "#ffa500"
+        },
+        {
+            "source": "hub_echo",
+            "target": "art_472562",
+            "name": "IDENTIFIED",
+            "color": "rgba(255,255,255,0.2)"
+        },
+        {
+            "source": "art_318622",
+            "target": "repo_5812640316136142274",
+            "name": "HOUSED_IN",
+            "color": "#1da1f2"
+        },
+        {
+            "source": "art_318622",
+            "target": "prov_8223028867212807233",
+            "name": "LOOTED_FROM",
+            "color": "#ffa500"
+        },
+        {
+            "source": "hub_echo",
+            "target": "art_318622",
+            "name": "IDENTIFIED",
+            "color": "rgba(255,255,255,0.2)"
+        }
+    ]
+}

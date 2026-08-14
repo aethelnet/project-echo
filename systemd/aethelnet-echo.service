@@ -1,0 +1,16 @@
+[Unit]
+Description=Aethelnet OS Forge App - Project Echo (Cultural Restitution Engine)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/nikahrlyn/project-echo
+Environment=PYTHONPATH=/home/nikahrlyn/project-echo
+ExecStart=/usr/bin/bash /home/nikahrlyn/project-echo/scripts/run.sh
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target
