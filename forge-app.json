@@ -1,0 +1,61 @@
+{
+  "$schema": "https://aethelnet.org/schemas/forge-app-v1.json",
+  "id": "org.aethelnet.project-echo",
+  "name": "Project Echo",
+  "version": "1.0.0",
+  "author": "Aethelnet Research Group & Masoso e.V.",
+  "license": "AGPL-3.0",
+  "category": "Provenance Intelligence & Cultural Restitution",
+  "description": "Autonomous OSINT and Liquid Graph Neural Network framework for tracking, cross-referencing, and surfacing non-obvious provenance paths of looted colonial artifacts.",
+  "icon": "assets/echo_icon.svg",
+  "tags": [
+    "provenance",
+    "cultural-heritage",
+    "osint",
+    "lgnn",
+    "restitution",
+    "wikidata-sparql",
+    "knowledge-graph"
+  ],
+  "entrypoints": {
+    "api": {
+      "command": "python3 backend/echo_engine.py",
+      "port": 5000,
+      "health_check": "/api/feed"
+    },
+    "hunter": {
+      "command": "python3 backend/echo_hunter.py",
+      "type": "daemon"
+    },
+    "psyop": {
+      "command": "python3 backend/echo_psyop_twitter.py",
+      "type": "cron",
+      "interval_seconds": 300
+    },
+    "ui": {
+      "path": "frontend/index.html",
+      "port": 8089,
+      "server_command": "python3 -m http.server 8089 --directory frontend"
+    }
+  },
+  "capabilities": [
+    "sparql_crawling",
+    "lgnn_tensor_inference",
+    "provenance_graph_synthesis",
+    "psyop_restitution_broadcasting"
+  ],
+  "environment": {
+    "PYTHONPATH": ".",
+    "ECHO_ENV": "production",
+    "WIKIDATA_ENDPOINT": "https://query.wikidata.org/sparql"
+  },
+  "dependencies": {
+    "python": ">=3.10",
+    "packages": [
+      "torch>=2.0.0",
+      "flask>=3.0.0",
+      "flask-cors>=4.0.0",
+      "requests>=2.31.0"
+    ]
+  }
+}

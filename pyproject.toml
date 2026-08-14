@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "project-echo"
+version = "1.0.0"
+description = "Algorithmic Cultural Restitution & Provenance OSINT Engine powered by Liquid Graph Neural Networks"
+readme = "README.md"
+authors = [
+    { name = "Aethelnet Research Group & Masoso e.V." }
+]
+license = { text = "AGPL-3.0" }
+dependencies = [
+    "torch>=2.0.0",
+    "flask>=3.0.0",
+    "flask-cors>=4.0.0",
+    "requests>=2.31.0",
+    "numpy>=1.24.0"
+]
+requires-python = ">=3.10"
