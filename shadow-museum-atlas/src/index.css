@@ -37,11 +37,41 @@ h1, h2, h3, h4, h5, h6 {
 /* ========================================================= */
 @media (max-width: 768px) {
   .app-header {
-    flex-direction: column !important;
-    align-items: flex-start !important;
-    height: auto !important;
-    padding: 8px !important;
-    gap: 8px !important;
+
+    flex-direction: row !important;
+
+    align-items: center !important;
+
+    height: 60px !important;
+
+    padding: 8px 12px !important;
+
+    gap: 16px !important;
+
+    overflow-x: auto !important;
+
+    -webkit-overflow-scrolling: touch;
+
+  }
+
+  .app-header > div {
+
+    flex-direction: row !important;
+
+    flex-wrap: nowrap !important;
+
+    max-width: none !important;
+
+    align-items: center !important;
+
+  }
+
+  .app-header > div > div {
+
+    flex-wrap: nowrap !important;
+
+    white-space: nowrap !important;
+
   }
   
   .app-workspace {
