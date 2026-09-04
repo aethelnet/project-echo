@@ -30,3 +30,60 @@ h1, h2, h3, h4, h5, h6 {
 .ui-overlay > * {
   pointer-events: auto;
 }
+
+
+/* ========================================================= */
+/* MOBILE RESPONSIVENESS & TOUCH PHYSICS (UNIT 734 PATCH)    */
+/* ========================================================= */
+@media (max-width: 768px) {
+  .app-header {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    height: auto !important;
+    padding: 8px !important;
+    gap: 8px !important;
+  }
+  
+  .app-workspace {
+    flex-direction: column !important;
+  }
+  
+  .left-sidebar {
+    display: none !important;
+  }
+  
+  .main-canvas {
+    width: 100vw !important;
+    height: 100% !important;
+    flex: none !important;
+  }
+  
+  /* The second aside (which gets classed as left-sidebar by accident) needs to be fixed.
+     Actually, any aside that isn't hidden is the inspector. Let's just target it. */
+  aside[style*="borderLeft"], aside[style*="border-left"] {
+    position: fixed !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    width: 100% !important;
+    height: 60vh !important;
+    border-left: none !important;
+    border-top: 4px solid #000000 !important;
+    z-index: 1000 !important;
+    box-shadow: 0px -4px 10px rgba(0,0,0,0.3) !important;
+  }
+
+  /* HUD Collapse: Hide the floating legends */
+  .ui-overlay {
+    display: none !important;
+  }
+
+  /* Touch Physics */
+  canvas {
+    touch-action: none !important; /* Verhindert Scrollen beim Pan/Zoom */
+  }
+  
+  /* Leaflet Map Touch Physics */
+  .leaflet-container {
+    touch-action: none !important;
+  }
+}

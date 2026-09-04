@@ -1,6 +1,7 @@
 // @ts-nocheck
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import ForceGraph2D from 'react-force-graph-2d';
+import GeodataMap from './GeodataMap';
 
 type MetricFilter = null | 'subjekte' | 'raub' | 'schenkung' | 'dissonanz' | 'verdacht' | 'akteure' | 'depots' | 'luecken';
 
@@ -21,6 +22,10 @@ export default function App() {
   const [hoveredLink, setHoveredLink] = useState<any>(null);
   const [searchTerm, setSearchTerm] = useState('');
   
+  // View Mode: 'graph' | 'map'
+  const [viewMode, setViewMode] = useState<'graph' | 'map'>('graph');
+  const [selectedRoute, setSelectedRoute] = useState<any | null>(null);
+
   // Interactive Metric Toggle (Oben Links)
   const [activeMetricFilter, setActiveMetricFilter] = useState<MetricFilter>(null);
 
@@ -1008,10 +1013,10 @@ export default function App() {
   }, [selectedNode, graphData, ghostIds, contestedIds, contestedMap]);
 
   return (
-    <div style={{ width: '100vw', height: '100vh', backgroundColor: '#FFFFFF', display: 'flex', flexDirection: 'column', overflow: 'hidden', fontFamily: "'Space Mono', monospace" }}>
+    <div className="app-root" style={{ width: '100vw', height: '100vh', backgroundColor: '#FFFFFF', display: 'flex', flexDirection: 'column', overflow: 'hidden', fontFamily: "'Space Mono', monospace" }}>
       
       {/* 1. TOP HEADER (Fixed in document flow, full width) */}
-      <header style={{ width: '100%', borderBottom: '3px solid #000000', backgroundColor: '#FFFFFF', padding: '10px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 60, flexShrink: 0, boxSizing: 'border-box' }}>
+      <header className="app-header" style={{ width: '100%', borderBottom: '3px solid #000000', backgroundColor: '#FFFFFF', padding: '10px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 60, flexShrink: 0, boxSizing: 'border-box' }}>
         
         {/* Linke Header-Sektion: Titel, Metriken, Quellen */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxWidth: '74%' }}>
@@ -1214,6 +1219,41 @@ export default function App() {
         {/* Rechte Header-Sektion: Aktionen & Suche */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', alignItems: 'flex-end' }}>
           <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+            {/* View Mode Switcher: Graph vs Geo-Karte */}
+            <div style={{ display: 'flex', border: '2px solid #000000', boxShadow: '2px 2px 0px #000000', marginRight: '4px' }}>
+              <button
+                onClick={() => setViewMode('graph')}
+                style={{
+                  padding: '6px 10px',
+                  backgroundColor: viewMode === 'graph' ? '#000000' : '#FFFFFF',
+                  color: viewMode === 'graph' ? '#FFFFFF' : '#000000',
+                  border: 'none',
+                  borderRight: '1px solid #000000',
+                  fontSize: '9px',
+                  fontWeight: 900,
+                  cursor: 'pointer',
+                  letterSpacing: '0.5px'
+                }}
+              >
+                [GRAPH-NETZWERK]
+              </button>
+              <button
+                onClick={() => setViewMode('map')}
+                style={{
+                  padding: '6px 10px',
+                  backgroundColor: viewMode === 'map' ? '#DC2626' : '#FFFFFF',
+                  color: viewMode === 'map' ? '#FFFFFF' : '#DC2626',
+                  border: 'none',
+                  fontSize: '9px',
+                  fontWeight: 900,
+                  cursor: 'pointer',
+                  letterSpacing: '0.5px'
+                }}
+              >
+                [GEO-KARTE (RESTITUTION)]
+              </button>
+            </div>
+
             <button
               onClick={() => {
                 const next = !kioskMode;
@@ -1340,12 +1380,14 @@ export default function App() {
       </header>
 
       {/* 2. MAIN 3-COLUMN WORKSPACE */}
-      <div style={{ flex: 1, display: 'flex', width: '100%', overflow: 'hidden', position: 'relative' }}>
+      <div className="app-workspace" style={{ flex: 1, display: 'flex', width: '100%', overflow: 'hidden', position: 'relative' }}>
         
         {/* COLUMN 1: LEFT SIDEBAR (SCHNELLFILTER) */}
         <aside
+          className="left-sidebar"
           style={{
             width: sidebarOpen ? '320px' : '44px',
+            className: 'left-sidebar',
             height: '100%',
             borderRight: '3px solid #000000',
             backgroundColor: '#FFFFFF',
@@ -1737,45 +1779,72 @@ export default function App() {
             backgroundColor: '#FFFFFF'
           }}
         >
-          <ForceGraph2D
-            ref={fgRef}
-            width={canvasDimensions.width}
-            height={canvasDimensions.height}
-            graphData={graphData}
-            backgroundColor="#FFFFFF"
-            nodeCanvasObject={nodeCanvasObject}
-            nodePointerAreaPaint={(node, color, ctx) => {
-              ctx.fillStyle = color;
-              ctx.beginPath();
-              ctx.arc(node.x, node.y, 9, 0, 2 * Math.PI, false);
-              ctx.fill();
-            }}
-            linkColor={linkColor}
-            linkWidth={linkWidth}
-            linkCurvature={(link: any) => link.curvature || 0}
-            linkCanvasObjectMode={(link: any) => link.type === 'VERDACHT_AUF' ? 'replace' : undefined}
-            linkCanvasObject={linkCanvasObject}
-            onNodeClick={(node) => {
-              setSelectedLink(null);
-              setSelectedNode(node);
-              if (fgRef.current) {
-                fgRef.current.centerAt(node.x, node.y, 600);
-                fgRef.current.zoom(2.5, 600);
-              }
-            }}
-            onLinkClick={(link) => {
-              setSelectedNode(null);
-              setSelectedLink(link);
-            }}
-            onLinkHover={(link) => setHoveredLink(link)}
-            onBackgroundClick={() => {
-              setSelectedNode(null);
-              setSelectedLink(null);
-            }}
-            cooldownTicks={120}
-            d3AlphaDecay={0.02}
-            d3VelocityDecay={0.3}
-          />
+          {viewMode === 'graph' ? (
+            <ForceGraph2D
+              ref={fgRef}
+              width={canvasDimensions.width}
+              height={canvasDimensions.height}
+              graphData={graphData}
+              backgroundColor="#FFFFFF"
+              nodeCanvasObject={nodeCanvasObject}
+              nodePointerAreaPaint={(node, color, ctx) => {
+                ctx.fillStyle = color;
+                ctx.beginPath();
+                ctx.arc(node.x, node.y, 9, 0, 2 * Math.PI, false);
+                ctx.fill();
+              }}
+              linkColor={linkColor}
+              linkWidth={linkWidth}
+              linkCurvature={(link: any) => link.curvature || 0}
+              linkCanvasObjectMode={(link: any) => link.type === 'VERDACHT_AUF' ? 'replace' : undefined}
+              linkCanvasObject={linkCanvasObject}
+              onNodeClick={(node) => {
+                setSelectedLink(null);
+                setSelectedRoute(null);
+                setSelectedNode(node);
+                if (fgRef.current) {
+                  fgRef.current.centerAt(node.x, node.y, 600);
+                  fgRef.current.zoom(2.5, 600);
+                }
+              }}
+              onLinkClick={(link) => {
+                setSelectedNode(null);
+                setSelectedRoute(null);
+                setSelectedLink(link);
+              }}
+              onLinkHover={(link) => setHoveredLink(link)}
+              onBackgroundClick={() => {
+                setSelectedNode(null);
+                setSelectedLink(null);
+                setSelectedRoute(null);
+              }}
+              cooldownTicks={120}
+              d3AlphaDecay={0.02}
+              d3VelocityDecay={0.3}
+            />
+          ) : (
+            <GeodataMap
+              activeMetricFilter={activeMetricFilter}
+              searchTerm={searchTerm}
+              onSelectNode={(node) => {
+                setSelectedLink(null);
+                setSelectedRoute(null);
+                const found = graphData.nodes.find((n: any) => n.id === node.id || n.label === node.label);
+                setSelectedNode(found || node);
+              }}
+              onSelectLink={(link) => {
+                setSelectedNode(null);
+                setSelectedRoute(null);
+                setSelectedLink(link);
+              }}
+              onSelectRoute={(route) => {
+                setSelectedNode(null);
+                setSelectedLink(null);
+                setSelectedRoute(route);
+              }}
+              selectedRouteId={selectedRoute?.id}
+            />
+          )}
 
           {/* Kiosk Mode Floating HUD */}
           {kioskMode && (
@@ -1812,6 +1881,7 @@ export default function App() {
           )}
 
           {/* Floating Legende (Unten Links im Canvas) */}
+          {viewMode === 'graph' && (
           <div style={{ position: 'absolute', bottom: 16, left: 16, padding: '8px 12px', backgroundColor: 'rgba(255, 255, 255, 0.95)', border: '2px solid #000000', boxShadow: '3px 3px 0px #000000', display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', zIndex: 20 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '9px', fontWeight: 'bold' }}>
               <span style={{ width: '9px', height: '9px', borderRadius: '50%', backgroundColor: '#000000', display: 'inline-block' }}></span>
@@ -1850,10 +1920,11 @@ export default function App() {
               VERDACHT (PROBABILISTISCH)
             </div>
           </div>
+          )}
         </main>
 
         {/* COLUMN 3: RIGHT INSPECTOR (KNOTEN- ODER KANTEN-AKTE) */}
-        {(selectedNodeDetails || selectedLink) && (
+        {(selectedNodeDetails || selectedLink || selectedRoute) && (
           <aside
             style={{
               width: '440px',
@@ -1868,7 +1939,7 @@ export default function App() {
             }}
           >
             {/* Case A: KNOTEN INSPEKTOR */}
-            {selectedNodeDetails && !selectedLink && (
+            {selectedNodeDetails && !selectedLink && !selectedRoute && (
               <div>
                 {/* Header & Close */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '3px solid #000000', paddingBottom: '12px', marginBottom: '16px' }}>
@@ -2277,7 +2348,7 @@ export default function App() {
             )}
 
             {/* Case B: KANTEN INSPEKTOR */}
-            {selectedLink && (
+            {selectedLink && !selectedRoute && (
               <div>
                 {/* Header & Close */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '3px solid #000000', paddingBottom: '12px', marginBottom: '16px' }}>
@@ -2421,6 +2492,164 @@ export default function App() {
                     )}
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* Case C: RESTITUTIONS-ROUTEN INSPEKTOR */}
+            {selectedRoute && (
+              <div>
+                {/* Header & Close */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '3px solid #000000', paddingBottom: '12px', marginBottom: '16px' }}>
+                  <div>
+                    <span
+                      style={{
+                        display: 'inline-block',
+                        backgroundColor: selectedRoute.has_suspicion ? '#0891B2' : (selectedRoute.has_contested ? '#CA8A04' : '#DC2626'),
+                        color: '#FFFFFF',
+                        padding: '2px 8px',
+                        fontSize: '9px',
+                        fontWeight: 'bold',
+                        letterSpacing: '0.5px',
+                        marginBottom: '4px'
+                      }}
+                    >
+                      {selectedRoute.has_suspicion ? '[FORENSISCHER VERDACHT: EXPEDITIONS-VEKTOR]' : '[RESTITUTIONS-VEKTOR: RAUBROUTE]'}
+                    </span>
+                    <h2 style={{ margin: '4px 0 0 0', fontSize: '14px', fontWeight: 900, wordBreak: 'break-word', color: '#000000' }}>
+                      {selectedRoute.origin_name} &rarr; {selectedRoute.depot_city}
+                    </h2>
+                  </div>
+                  <button
+                    onClick={() => setSelectedRoute(null)}
+                    style={{
+                      border: '2px solid #000000',
+                      background: '#FFFFFF',
+                      padding: '4px 8px',
+                      fontWeight: 'bold',
+                      fontSize: '11px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    [X]
+                  </button>
+                </div>
+
+                {/* Route Metriken */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}>
+                  <div style={{ border: '1px solid #000000', padding: '8px', backgroundColor: '#F8FAFC' }}>
+                    <div style={{ fontSize: '8px', color: '#64748B', fontWeight: 'bold' }}>HERKUNFTS-DISTRIKT / POLITY (KAMERUN):</div>
+                    <div style={{ fontSize: '11px', fontWeight: 'bold', color: '#000000', marginTop: '2px' }}>
+                      {selectedRoute.origin_name} ({selectedRoute.origin_region})
+                    </div>
+                  </div>
+
+                  <div style={{ border: '1px solid #000000', padding: '8px', backgroundColor: '#F8FAFC' }}>
+                    <div style={{ fontSize: '8px', color: '#64748B', fontWeight: 'bold' }}>ZIEL-DEPOT (MUSEUM):</div>
+                    <div style={{ fontSize: '11px', fontWeight: 'bold', color: '#000000', marginTop: '2px' }}>
+                      {selectedRoute.depot_name}
+                    </div>
+                  </div>
+
+                  <div style={{ border: '1px solid #000000', padding: '8px', backgroundColor: '#FEF2F2', borderLeft: '4px solid #DC2626' }}>
+                    <div style={{ fontSize: '8px', color: '#991B1B', fontWeight: 'bold' }}>KULTURGÜTER AUF DIESEM VEKTOR:</div>
+                    <div style={{ fontSize: '13px', fontWeight: 900, color: '#DC2626', marginTop: '2px' }}>
+                      {selectedRoute.object_count} Objekte
+                    </div>
+                  </div>
+
+                  <div style={{ border: '1px solid #000000', padding: '8px', backgroundColor: '#F8FAFC' }}>
+                    <div style={{ fontSize: '8px', color: '#64748B', fontWeight: 'bold' }}>KOLONIALOFFIZIERE / TÄTER:</div>
+                    <div style={{ fontSize: '10px', fontWeight: 'bold', color: '#B45309', marginTop: '2px' }}>
+                      {selectedRoute.actors.join(', ') || 'Schutztruppe / Nicht namentlich erfasst'}
+                    </div>
+                  </div>
+
+                  <div style={{ border: '1px solid #000000', padding: '8px', backgroundColor: '#F8FAFC' }}>
+                    <div style={{ fontSize: '8px', color: '#64748B', fontWeight: 'bold' }}>MILITÄRISCHE EXPEDITIONEN:</div>
+                    <div style={{ fontSize: '10px', fontWeight: 'bold', color: '#000000', marginTop: '2px' }}>
+                      {selectedRoute.expeditions.join(', ')}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Batch Export Button */}
+                <button
+                  onClick={() => handleBatchDossier('actor', selectedRoute.actors[0] || selectedRoute.origin_name)}
+                  disabled={isGeneratingBatch}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    backgroundColor: '#000000',
+                    color: '#FFFFFF',
+                    border: '2px solid #000000',
+                    boxShadow: '3px 3px 0px #DC2626',
+                    fontSize: '9px',
+                    fontWeight: 900,
+                    cursor: isGeneratingBatch ? 'wait' : 'pointer',
+                    marginBottom: '16px'
+                  }}
+                >
+                  {isGeneratingBatch ? '[BÜNDLE ROUTEN-ARCHIV...]' : `[ALLE ${selectedRoute.object_count} DOSSIERS DIESER ROUTE EXPORTIEREN (ZIP)]`}
+                </button>
+
+                {/* Liste der Kulturgüter */}
+                <div>
+                  <div style={{ fontSize: '9px', fontWeight: 900, color: '#000000', marginBottom: '8px', letterSpacing: '0.5px' }}>
+                    RAUBKUNST-SUBJEKTE ({selectedRoute.objects.length}):
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '380px', overflowY: 'auto' }}>
+                    {selectedRoute.objects.map((obj: any, idx: number) => (
+                      <div
+                        key={idx}
+                        onClick={() => {
+                          const found = graphData.nodes.find((n: any) => n.id === obj.inv);
+                          setSelectedRoute(null);
+                          setSelectedNode(found || {
+                            id: obj.inv,
+                            label: obj.bez || obj.inv,
+                            type: 'Subjekt',
+                            desc: obj.bez || '',
+                            contested: obj.contested
+                          });
+                        }}
+                        style={{
+                          padding: '8px',
+                          border: '1px solid #000000',
+                          backgroundColor: obj.contested ? '#FEFCE8' : '#FFFFFF',
+                          cursor: 'pointer',
+                          boxShadow: '1px 1px 0px #000000'
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontSize: '10px', fontWeight: 900, color: '#000000' }}>
+                            {obj.inv}
+                          </span>
+                          {obj.contested && (
+                            <span style={{ fontSize: '7px', fontWeight: 'bold', backgroundColor: '#CA8A04', color: '#FFFFFF', padding: '1px 4px' }}>
+                              DISSONANZ
+                            </span>
+                          )}
+                          {obj.rel_type === 'VERDACHT_AUF' && (
+                            <span style={{ fontSize: '7px', fontWeight: 'bold', backgroundColor: '#0891B2', color: '#FFFFFF', padding: '1px 4px' }}>
+                              VERDACHT
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ fontSize: '9px', color: '#475569', marginTop: '2px' }}>
+                          {obj.bez || 'Ohne Bezeichnung'}
+                        </div>
+                        {obj.actor && (
+                          <div style={{ fontSize: '8px', color: '#B45309', marginTop: '2px' }}>
+                            Täter: {obj.actor}
+                          </div>
+                        )}
+                        <div style={{ fontSize: '7px', color: '#0284C7', marginTop: '4px', fontWeight: 'bold' }}>
+                          [KLICKEN: EINZEL-DOSSIER ÖFFNEN]
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
             )}
           </aside>
