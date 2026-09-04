@@ -1,0 +1,30 @@
+version: '3.8'
+services:
+  shadow-atlas:
+    build: .
+    ports:
+      - "8088:8088"
+    volumes:
+      - ./workspaces:/app/workspaces
+    environment:
+      - NODE_ENV=production
+      - PORT=8088
+      - DATABASE_URL=postgres://shadow_user:shadow_password@db:5432/shadow_atlas
+    depends_on:
+      - db
+    restart: unless-stopped
+
+  db:
+    image: postgres:15
+    environment:
+      - POSTGRES_USER=shadow_user
+      - POSTGRES_PASSWORD=shadow_password
+      - POSTGRES_DB=shadow_atlas
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  pgdata:

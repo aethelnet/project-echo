@@ -1,0 +1,27 @@
+{$DOMAIN_NAME:localhost} {
+    # 1. Optionale HTTP Basic Auth Schutzschranke fuer geschuetzten Zugriff
+    # Aktiviere diese Zeile nach Generierung des Passwort-Hashes via 'docker compose run --rm web caddy hash-password':
+    # basicauth / {
+    #     {$AUTH_USER:marianne} {$AUTH_HASH}
+    # }
+
+    # 2. API Reverse Proxy zu FastAPI
+    handle /api/* {
+        reverse_proxy api:8088 {
+            header_up Host {host}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+
+    # 3. Frontend Single-Page-App (SPA) Routing & Caching
+    handle {
+        root * /srv
+        try_files {path} /index.html
+        file_server
+    }
+
+    # Kompression fuer schnelle Übertragung
+    encode gzip zstd
+}

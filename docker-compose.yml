@@ -1,0 +1,72 @@
+version: '3.8'
+
+services:
+  neo4j:
+    image: neo4j:5.26-community
+    container_name: echo_neo4j
+    restart: unless-stopped
+    environment:
+      - NEO4J_AUTH=none
+      - NEO4J_PLUGINS=["apoc"]
+      - NEO4J_dbms_security_procedures_unrestricted=apoc.*
+      - NEO4J_dbms_memory_heap_initial__size=1G
+      - NEO4J_dbms_memory_heap_max__size=4G
+      - NEO4J_dbms_memory_pagecache_size=2G
+    volumes:
+      - neo4j_data:/data
+    networks:
+      - echo_network
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p none 'RETURN 1' >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+      start_period: 10s
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: echo_api
+    restart: unless-stopped
+    environment:
+      - NEO4J_URI=bolt://neo4j:7687
+      - PORT=8088
+    volumes:
+      - ./dossiers:/app/dossiers
+      - ./shadow-museum-atlas/data_dropzone:/app/shadow-museum-atlas/data_dropzone
+    depends_on:
+      neo4j:
+        condition: service_healthy
+    networks:
+      - echo_network
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    container_name: echo_web
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - DOMAIN_NAME=${DOMAIN_NAME:-localhost}
+      - AUTH_USER=${AUTH_USER:-marianne}
+      - AUTH_HASH=${AUTH_HASH:-}
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+    networks:
+      - echo_network
+
+volumes:
+  neo4j_data:
+  caddy_data:
+  caddy_config:
+
+networks:
+  echo_network:
+    driver: bridge

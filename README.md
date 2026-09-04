@@ -1,69 +1,82 @@
-# Project Echo (Aethelnet Forge App)
+# Project Echo: Algorithmic Provenance & Restitution Engine
 
-**Algorithmic Restitution Framework for Stolen Heritage**
+**Forensische Wissensgraph-Architektur zur Aufdeckung kolonialer Raubnetzwerke und institutioneller Dissonanzen.**
 
-Project Echo is an advanced analytical engine designed to cross-reference colonial archives, historic flight/shipping routes, and oral histories. By utilizing a **Liquid Graph Neural Network (LGNN)**, Echo discovers non-obvious topological connections between museum inventories and lost cultural artifacts.
-
----
-
-## Overview
-This repository contains the standalone, decoupled engine and presentation layer for Project Echo, structured as a certified **Aethelnet OS Forge Application**. It is designed to be easily deployed by researchers, historians, and restitution organizations (e.g., Masoso e.V.).
-
-### Key Features
-- **LGNN Tensor Core**: PyTorch-based neural engine trained on multi-modal historic provenance data to calculate loot probability and semantic cosine similarity.
-- **Wikidata SPARQL Crawler (`echo_hunter.py`)**: Bypasses museum WAFs by querying decentralized knowledge graphs directly.
-- **Social Engineering / Psyop Dispatcher (`echo_psyop_twitter.py`)**: Automatically generates demand-for-restitution campaigns based on validated high-confidence discoveries.
-- **Cinematic 3D Force Graph UI**: A glassmorphic dark-mode web interface for visualizing provenance network topologies in real-time.
-- **Forge App Native**: Includes standard `forge-app.json` manifest, systemd service units, and one-click launch scripts.
+Project Echo ist ein evidenzbasiertes Ermittlungs- und Restitutionswerkzeug für Provenienzforscher, Historiker und Herkunftsgesellschaften (u. a. für Marianne Njioh, Richard Tsogang Fossi und Forschungsgruppen der TU Berlin). Es transformiert fragmentierte koloniale Militärregister, Auktionskataloge, Archivakten und Museumsinventare in einen multidimensionalen gerichtsfesten Wissensgraphen.
 
 ---
 
-## Project Structure
+## 1. Kern-Architektur & Forensische Methodik
+
+### A. Multigraph-Dissonanz-Erkennung (Whitewashing vs. Realität)
+Klassische Datenbanken versagen bei widersprüchlichen historischen Narrativen. Project Echo modelliert widersprüchliche Überlieferungen als parallele Kanten zwischen denselben Knoten:
+* **[:RAUBTE] / [:ENTEIGNETE]** (Blutrot `#DC2626`): Belegte koloniale Gewaltakte, Strafexpeditionen und Plünderungen (z. B. Hans Glauning, Curt von Pavel, Oltwig von Kamptz).
+* **[:SCHENKTE] / [:UEBERGAB_AN]** (Blau `#2563EB`): Offizielle institutionelle Schutzbehauptungen und Schenkungsnarrative der aufnehmenden Museen.
+* **Geometrische Doppel-Ellipsen**: Das UI rendert Widersprüche als gegenläufig gekrümmte Kantenpaare (`curvature: ±0.22`), sodass institutionelle Verschleierung auf Pixelebene unmittelbar sichtbar wird.
+
+### B. Autonomer Provenance Hunter (Heuristische Rekonstruktion)
+Das System identifiziert systematisch Provenienzlücken (Subjekte mit reinem `[:LAGERT_IN]` ohne dokumentierten Erwerbsakt) und schließt sie automatisiert über 3-Stufen-Inferenz:
+1. **Tier 1 (95 % Konfidenz)**: Direkter Inventarnummern-Abgleich gegen historische Strafexpeditionsregister (z. B. TU Berlin Cameroon Expeditions Dataset).
+2. **Tier 2 (85–90 % Konfidenz)**: Sequenzielle Zugangs-Batches und Akteurs-Korrelationen.
+3. **Tier 3 (85 % Konfidenz)**: Kontextuelle Zuordnungen (z. B. Mandu-Yenu-Prachtthron gekoppelt an Glaunings Nso-Feldzug 1906 und Bundesarchiv-Akten).
+* Verdachtsfälle werden im Graphen als gestrichelte Kanten `[:VERDACHT_AUF]` (Cyan `#0891B2`) mit explizitem Konfidenzwert und Aktennachweis visualisiert.
+
+### C. Juristischer Dossier- & IFG-Generator
+* **2-Seiten Restitutions-Gutachten (PDF)**: 1-Klick-Generierung gerichtsverwertbarer Dossiers mit Washingtoner-Prinzipien-Schutzklausel, Beweiskette und Primärquellenbelegen.
+* **Batch-Export (ZIP)**: Schnürt hunderte Gutachten eines Täters oder Museums in ein gebündeltes ZIP-Archiv.
+* **IFG-Auskunftsersuchen**: Generiert für ungelöste Museums-Blackboxes formelle Anträge nach dem Informationsfreiheitsgesetz auf Herausgabe der historischen handschriftlichen Zugangsbücher (1884–1916).
+
+### D. Klinisches Brutalismus-Frontend
+* **Reinweiß-Ästhetik (`#FFFFFF`)**: Verzicht auf Schmuckelemente und Emojis zugunsten juristischer Nüchternheit.
+* **Ontologische Präzision**: Konsequente Klassifikation als `Subjekte` statt passiver Objekte (Würdigung lebendiger Entitäten wie *Ngonnso*).
+* **Interaktive Metrik-Toggles & Schnellfilter-Drawer**: Direkte Isolation der Top-Akteure und Depots.
+* **Ausstellungs-Kiosk-Modus**: Autonome Kameraführung zwischen signifikanten Dissonanz-Knoten für Museums- und Tagungspräsentationen.
+
+---
+
+## 2. Repository-Struktur
+
 ```text
 project-echo/
-├── forge-app.json              # Aethelnet Forge Application Manifest
-├── pyproject.toml              # Standard Python packaging
-├── requirements.txt            # Python dependencies
-├── backend/
-│   ├── echo_engine.py          # Main Flask API and Graph Router (Port 5000)
-│   ├── echo_hunter.py          # Background Wikidata SPARQL Crawler Daemon
-│   ├── echo_lgnn_tensor.py     # PyTorch LGNN Neural Tensor Architecture
-│   ├── echo_psyop_twitter.py   # Restitution Tweet Dispatcher
-│   ├── echo_topology.py        # 3D Graph Topology Generator
-│   ├── hunter_database.json    # Verified Looted Artifacts Database
-│   ├── psyop_drafts.json       # Generated Restitution Campaigns
-│   └── topology_graph.json     # 3D Force-Graph Data
-├── frontend/
-│   ├── index.html              # Cinematic UI (Dark Mode + 3D Force Graph)
-│   └── prototype.html          # Legacy minimal UI
-├── model/
-│   └── echo_tensor_core_v1.pth # Pre-trained LGNN weights
-├── scripts/
-│   └── run.sh                  # One-click startup script for all services
-└── systemd/
-    └── aethelnet-echo.service  # Systemd service unit for 24/7 background operation
+├── docker-compose.yml              # Multi-Container-Orchestrierung (Neo4j, API, Web)
+├── Dockerfile.api                  # Python 3.11 FastAPI Backend mit PDF-Engine
+├── Dockerfile.web                  # Multi-Stage Build: Vite React -> Caddy v2
+├── Caddyfile                       # Automatisches Let's Encrypt SSL & Basic Auth
+├── docker-entrypoint.sh            # Healthcheck & Cold-Start Initialisierung
+├── import_seed.py                  # Schneller Cypher-Seed-Importer (<6s Restore)
+├── seed_graph.json.gz              # Komprimierter initialer Graph (2.200+ Knoten, 6.600+ Kanten)
+├── serve_graph_api.py              # FastAPI REST-Brücke (Filter, Lücken, Dossier-API)
+├── autonomous_provenance_hunter.py # Heuristische Inferenz-Pipeline für Provenienzlücken
+├── generate_restitution_dossier.py # ReportLab PDF-Generator für Washingtoner Prinzipien
+├── extract_provenance_triples.py   # Multi-Format Ingestion Engine (PDF, XLSX, TXT)
+├── enrich_contested_multigraph.py  # Dissonanz- und Konflikt-Berechnung
+├── DEPLOYMENT.md                   # Vollständige Produktions- und Server-Dokumentation
+└── shadow-museum-atlas/            # React + Vite + TypeScript Frontend
+    ├── src/
+    │   ├── App.tsx                 # ForceGraph2D Canvas, Drawer, Inspektor & Kiosk
+    │   └── ...
+    └── package.json
 ```
 
 ---
 
-## Getting Started
+## 3. Schnellanleitung: Lokale Entwicklung
 
-### 1. One-Click Launch (Recommended)
+### Voraussetzungen
+* Docker & Docker Compose (oder Podman)
+* Alternativ: Node.js 18+, Python 3.10+, laufende Neo4j-Instanz (Port 7687)
+
+### Start via Docker Compose
 ```bash
-./scripts/run.sh
+cp .env.example .env
+docker compose up -d --build
 ```
-* **API Server:** `http://localhost:5000`
-* **Web UI:** `http://localhost:8089`
-
-### 2. Run with Systemd (Persistent Daemon)
-```bash
-systemctl --user enable --now aethelnet-echo.service
-```
+Die Anwendung ist anschließend unter `http://localhost:80` bzw. `http://localhost:5173` erreichbar.
 
 ---
 
-## License
-This project is licensed under the GNU Affero General Public License v3.0 (AGPL-3.0). See the [LICENSE](LICENSE) file for details.
+## 4. Lizenz & Ethik
 
----
-*Built with precision and purpose by the Aethelnet Team for Masoso e.V.*
+Dieses Projekt steht unter der GNU Affero General Public License v3.0 (AGPL-3.0). Siehe [LICENSE](LICENSE).
+
+Daten und Beweisketten dienen ausschließlich der historischen Aufklärung, Restitutionsbegründung und Rückführung geraubter Kulturgüter an ihre rechtmäßigen Herkunftsgemeinschaften.
