@@ -1,0 +1,32 @@
+FROM python:3.11-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    DEBIAN_FRONTEND=noninteractive
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    build-essential \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements-api.txt .
+RUN pip install --no-cache-dir -r requirements-api.txt
+
+COPY serve_graph_api.py .
+COPY generate_restitution_dossier.py .
+COPY extract_provenance_triples.py .
+COPY enrich_contested_multigraph.py .
+COPY autonomous_provenance_hunter.py .
+COPY import_seed.py .
+COPY seed_graph.json.gz .
+COPY docker-entrypoint.sh .
+
+RUN chmod +x docker-entrypoint.sh && \
+    mkdir -p dossiers && \
+    mkdir -p shadow-museum-atlas/data_dropzone/verified_research
+
+EXPOSE 8088
+
+ENTRYPOINT ["/app/docker-entrypoint.sh"]

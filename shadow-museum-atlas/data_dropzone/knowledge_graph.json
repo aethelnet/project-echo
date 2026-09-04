@@ -1,0 +1,412 @@
+{
+  "nodes": [
+    {
+      "id": "36f61617",
+      "label": "Ngonnso (Skulptur / Mutter)",
+      "type": "Subject",
+      "status": "verified",
+      "source": "kamerun_fokus.json"
+    },
+    {
+      "id": "dec97040",
+      "label": "Ethnologisches Museum Berlin",
+      "type": "Location",
+      "status": "verified",
+      "source": "kamerun_fokus.json"
+    },
+    {
+      "id": "4a35758b",
+      "label": "K\u00f6nig Nso'",
+      "type": "Subject",
+      "status": "verified",
+      "source": "kamerun_fokus.json"
+    },
+    {
+      "id": "11d2e222",
+      "label": "Kumbo, Kamerun",
+      "type": "Location",
+      "status": "verified",
+      "source": "kamerun_fokus.json"
+    },
+    {
+      "id": "2b69ccec",
+      "label": "Kurt von Pavel",
+      "type": "Subject",
+      "status": "verified",
+      "source": "kamerun_fokus.json"
+    },
+    {
+      "id": "5c9b3ffd",
+      "label": "Deutsches Kaiserreich (Milit\u00e4r)",
+      "type": "Location",
+      "status": "verified",
+      "source": "kamerun_fokus.json"
+    },
+    {
+      "id": "a9de469c",
+      "label": "Palast von Kumbo",
+      "type": "Subject",
+      "status": "verified",
+      "source": "kamerun_fokus.json"
+    },
+    {
+      "id": "795fe4be",
+      "label": "Document: atlas_der_abwesenheit.txt",
+      "type": "Document",
+      "status": "verified",
+      "source": "atlas_der_abwesenheit.txt"
+    },
+    {
+      "id": "3c2f3ab6",
+      "label": "Bundesarchiv, R 175",
+      "type": "Archive File",
+      "status": "verified",
+      "source": "atlas_der_abwesenheit.txt"
+    },
+    {
+      "id": "f29f0bfd",
+      "label": "Bundesarchiv, R 4901/13278",
+      "type": "Archive File",
+      "status": "verified",
+      "source": "atlas_der_abwesenheit.txt"
+    },
+    {
+      "id": "a0a49025",
+      "label": "Bundesarchiv, Akten der DFG, R 73/15116",
+      "type": "Archive File",
+      "status": "verified",
+      "source": "atlas_der_abwesenheit.txt"
+    },
+    {
+      "id": "11986d2d",
+      "label": "Zentralarchiv, Ankermann 1909",
+      "type": "Archive File",
+      "status": "verified",
+      "source": "atlas_der_abwesenheit.txt"
+    },
+    {
+      "id": "c64ddd2c",
+      "label": "Zentralarchiv, Dominik 1898",
+      "type": "Archive File",
+      "status": "verified",
+      "source": "atlas_der_abwesenheit.txt"
+    },
+    {
+      "id": "0fd5346a",
+      "label": "Bildarchiv des \u00dcbersee-Museums, in: Briskorn\n2000",
+      "type": "Archive File",
+      "status": "verified",
+      "source": "atlas_der_abwesenheit.txt"
+    },
+    {
+      "id": "8bdeee1a",
+      "label": "Bundesarchiv R 175",
+      "type": "Archive File",
+      "status": "verified",
+      "source": "atlas_der_abwesenheit.txt"
+    },
+    {
+      "id": "059eca52",
+      "label": "Zentralarchiv, Luschan 1905",
+      "type": "Archive File",
+      "status": "verified",
+      "source": "atlas_der_abwesenheit.txt"
+    },
+    {
+      "id": "f9e072de",
+      "label": "Zentralarchiv, H\u00f6semann 1901",
+      "type": "Archive File",
+      "status": "verified",
+      "source": "atlas_der_abwesenheit.txt"
+    },
+    {
+      "id": "cb9273f9",
+      "label": "Zentralarchiv, Umlauff 1914",
+      "type": "Archive File",
+      "status": "verified",
+      "source": "atlas_der_abwesenheit.txt"
+    },
+    {
+      "id": "6f560fff",
+      "label": "Zentralarchiv, Umlauff 1898",
+      "type": "Archive File",
+      "status": "verified",
+      "source": "atlas_der_abwesenheit.txt"
+    },
+    {
+      "id": "36aa4249",
+      "label": "Verwaltungsarchiv VA 1980",
+      "type": "Archive File",
+      "status": "verified",
+      "source": "atlas_der_abwesenheit.txt"
+    },
+    {
+      "id": "3551efe9",
+      "label": "Zentralarchiv, Zenker 1901",
+      "type": "Archive File",
+      "status": "verified",
+      "source": "atlas_der_abwesenheit.txt"
+    },
+    {
+      "id": "3a90153d",
+      "label": "Zentralarchiv, Zenker 1899",
+      "type": "Archive File",
+      "status": "verified",
+      "source": "atlas_der_abwesenheit.txt"
+    },
+    {
+      "id": "3c525446",
+      "label": "Bundesarchiv, Bild\n116",
+      "type": "Archive File",
+      "status": "verified",
+      "source": "atlas_der_abwesenheit.txt"
+    },
+    {
+      "id": "a0e77871",
+      "label": "Bundesarchiv, Bild 137029858",
+      "type": "Archive File",
+      "status": "verified",
+      "source": "atlas_der_abwesenheit.txt"
+    },
+    {
+      "id": "3a3f68d7",
+      "label": "Brief von Luschan",
+      "type": "Personal Document",
+      "status": "verified",
+      "source": "atlas_der_abwesenheit.txt"
+    },
+    {
+      "id": "40a11a26",
+      "label": "Brief von Nacho Steane",
+      "type": "Personal Document",
+      "status": "verified",
+      "source": "atlas_der_abwesenheit.txt"
+    },
+    {
+      "id": "57371bba",
+      "label": "Brief von Wilhelm",
+      "type": "Personal Document",
+      "status": "verified",
+      "source": "atlas_der_abwesenheit.txt"
+    },
+    {
+      "id": "ceca7074",
+      "label": "Brief von Luschans",
+      "type": "Personal Document",
+      "status": "verified",
+      "source": "atlas_der_abwesenheit.txt"
+    },
+    {
+      "id": "b8335aa4",
+      "label": "Brief von Ludwig Heck",
+      "type": "Personal Document",
+      "status": "verified",
+      "source": "atlas_der_abwesenheit.txt"
+    },
+    {
+      "id": "0658fd48",
+      "label": "Brief von Prince Kum",
+      "type": "Personal Document",
+      "status": "verified",
+      "source": "atlas_der_abwesenheit.txt"
+    },
+    {
+      "id": "4b44c551",
+      "label": "Brief von Paul Matschie",
+      "type": "Personal Document",
+      "status": "verified",
+      "source": "atlas_der_abwesenheit.txt"
+    },
+    {
+      "id": "48e612a6",
+      "label": "Document: spider_crawl_K\u00f6nig_Nso'.txt",
+      "type": "Document",
+      "status": "verified",
+      "source": "spider_crawl_K\u00f6nig_Nso'.txt"
+    },
+    {
+      "id": "b050b627",
+      "label": "Document: spider_crawl_Ethnologisches_Museum_Berlin.txt",
+      "type": "Document",
+      "status": "verified",
+      "source": "spider_crawl_Ethnologisches_Museum_Berlin.txt"
+    },
+    {
+      "id": "dc90ee99",
+      "label": "BArch R 1001/4433 (AI Discovery)",
+      "type": "Archive File",
+      "status": "suggested",
+      "confidence": 0.92
+    }
+  ],
+  "edges": [
+    {
+      "source": "36f61617",
+      "target": "dec97040",
+      "label": "located_at",
+      "status": "verified"
+    },
+    {
+      "source": "4a35758b",
+      "target": "11d2e222",
+      "label": "located_at",
+      "status": "verified"
+    },
+    {
+      "source": "2b69ccec",
+      "target": "5c9b3ffd",
+      "label": "located_at",
+      "status": "verified"
+    },
+    {
+      "source": "a9de469c",
+      "target": "11d2e222",
+      "label": "located_at",
+      "status": "verified"
+    },
+    {
+      "source": "795fe4be",
+      "target": "3c2f3ab6",
+      "label": "cites_source",
+      "status": "verified"
+    },
+    {
+      "source": "795fe4be",
+      "target": "f29f0bfd",
+      "label": "cites_source",
+      "status": "verified"
+    },
+    {
+      "source": "795fe4be",
+      "target": "a0a49025",
+      "label": "cites_source",
+      "status": "verified"
+    },
+    {
+      "source": "795fe4be",
+      "target": "11986d2d",
+      "label": "cites_source",
+      "status": "verified"
+    },
+    {
+      "source": "795fe4be",
+      "target": "c64ddd2c",
+      "label": "cites_source",
+      "status": "verified"
+    },
+    {
+      "source": "795fe4be",
+      "target": "0fd5346a",
+      "label": "cites_source",
+      "status": "verified"
+    },
+    {
+      "source": "795fe4be",
+      "target": "8bdeee1a",
+      "label": "cites_source",
+      "status": "verified"
+    },
+    {
+      "source": "795fe4be",
+      "target": "059eca52",
+      "label": "cites_source",
+      "status": "verified"
+    },
+    {
+      "source": "795fe4be",
+      "target": "f9e072de",
+      "label": "cites_source",
+      "status": "verified"
+    },
+    {
+      "source": "795fe4be",
+      "target": "cb9273f9",
+      "label": "cites_source",
+      "status": "verified"
+    },
+    {
+      "source": "795fe4be",
+      "target": "6f560fff",
+      "label": "cites_source",
+      "status": "verified"
+    },
+    {
+      "source": "795fe4be",
+      "target": "36aa4249",
+      "label": "cites_source",
+      "status": "verified"
+    },
+    {
+      "source": "795fe4be",
+      "target": "3551efe9",
+      "label": "cites_source",
+      "status": "verified"
+    },
+    {
+      "source": "795fe4be",
+      "target": "3a90153d",
+      "label": "cites_source",
+      "status": "verified"
+    },
+    {
+      "source": "795fe4be",
+      "target": "3c525446",
+      "label": "cites_source",
+      "status": "verified"
+    },
+    {
+      "source": "795fe4be",
+      "target": "a0e77871",
+      "label": "cites_source",
+      "status": "verified"
+    },
+    {
+      "source": "795fe4be",
+      "target": "3a3f68d7",
+      "label": "cites_source",
+      "status": "verified"
+    },
+    {
+      "source": "795fe4be",
+      "target": "40a11a26",
+      "label": "cites_source",
+      "status": "verified"
+    },
+    {
+      "source": "795fe4be",
+      "target": "57371bba",
+      "label": "cites_source",
+      "status": "verified"
+    },
+    {
+      "source": "795fe4be",
+      "target": "ceca7074",
+      "label": "cites_source",
+      "status": "verified"
+    },
+    {
+      "source": "795fe4be",
+      "target": "b8335aa4",
+      "label": "cites_source",
+      "status": "verified"
+    },
+    {
+      "source": "795fe4be",
+      "target": "0658fd48",
+      "label": "cites_source",
+      "status": "verified"
+    },
+    {
+      "source": "795fe4be",
+      "target": "4b44c551",
+      "label": "cites_source",
+      "status": "verified"
+    },
+    {
+      "source": "36f61617",
+      "target": "dc90ee99",
+      "label": "related_archival_context",
+      "status": "suggested"
+    }
+  ]
+}

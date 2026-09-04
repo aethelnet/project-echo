@@ -1,0 +1,18 @@
+# Stage 1: Build Frontend Single Page App
+FROM node:20-alpine AS frontend-builder
+
+WORKDIR /app
+
+COPY shadow-museum-atlas/package*.json ./
+RUN npm ci
+
+COPY shadow-museum-atlas/ ./
+RUN npm run build
+
+# Stage 2: Caddy Production Server (Automatic HTTPS & Edge Proxy)
+FROM caddy:2-alpine
+
+COPY --from=frontend-builder /app/dist /srv
+COPY Caddyfile /etc/caddy/Caddyfile
+
+EXPOSE 80 443

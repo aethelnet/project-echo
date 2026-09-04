@@ -1,0 +1,32 @@
+/* White Light Brutalism Overrides */
+
+input, button, select, textarea {
+  border-radius: 0 !important;
+  font-family: 'Space Mono', monospace;
+}
+
+input:focus, button:focus, textarea:focus {
+  outline: 2px solid #DC2626;
+  outline-offset: 2px;
+}
+
+button:hover {
+  background-color: #000 !important;
+  color: #FFF !important;
+}
+
+/* Scrollbar Brutalism */
+::-webkit-scrollbar {
+  width: 12px;
+  border-left: 2px solid #000;
+}
+::-webkit-scrollbar-track {
+  background: #FFFFFF;
+}
+::-webkit-scrollbar-thumb {
+  background: #000000;
+  border: 2px solid #FFFFFF;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #DC2626;
+}
