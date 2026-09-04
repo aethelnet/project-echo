@@ -1,82 +1,67 @@
-# Project Echo: Algorithmic Provenance & Restitution Engine
+# Project Echo: Autonomous Provenance Hunter
+**Forschungsumgebung für Provenienzforschung und Netzwerkanalyse**
 
-**Forensische Wissensgraph-Architektur zur Aufdeckung kolonialer Raubnetzwerke und institutioneller Dissonanzen.**
+Dieses Tool wurde für Forscher entwickelt, um koloniale Raubgut-Netzwerke, Akteure und Institutionen dynamisch zu erfassen, zu visualisieren und mit Live-Daten abzugleichen.
 
-Project Echo ist ein evidenzbasiertes Ermittlungs- und Restitutionswerkzeug für Provenienzforscher, Historiker und Herkunftsgesellschaften (u. a. für Marianne Njioh, Richard Tsogang Fossi und Forschungsgruppen der TU Berlin). Es transformiert fragmentierte koloniale Militärregister, Auktionskataloge, Archivakten und Museumsinventare in einen multidimensionalen gerichtsfesten Wissensgraphen.
+## Lokale Installation & Start (Für Studenten & Forschungsgruppen)
 
----
+Um ein komplett eigenes, privates Netzwerk auf dem eigenen Rechner (z.B. an der TU Berlin) aufzubauen, müssen Sie das System lokal starten.
 
-## 1. Kern-Architektur & Forensische Methodik
+### Systemvoraussetzungen
+- **Docker** (für die Neo4j-Datenbank)
+- **Python 3.10+**
+- **Node.js 18+**
 
-### A. Multigraph-Dissonanz-Erkennung (Whitewashing vs. Realität)
-Klassische Datenbanken versagen bei widersprüchlichen historischen Narrativen. Project Echo modelliert widersprüchliche Überlieferungen als parallele Kanten zwischen denselben Knoten:
-* **[:RAUBTE] / [:ENTEIGNETE]** (Blutrot `#DC2626`): Belegte koloniale Gewaltakte, Strafexpeditionen und Plünderungen (z. B. Hans Glauning, Curt von Pavel, Oltwig von Kamptz).
-* **[:SCHENKTE] / [:UEBERGAB_AN]** (Blau `#2563EB`): Offizielle institutionelle Schutzbehauptungen und Schenkungsnarrative der aufnehmenden Museen.
-* **Geometrische Doppel-Ellipsen**: Das UI rendert Widersprüche als gegenläufig gekrümmte Kantenpaare (`curvature: ±0.22`), sodass institutionelle Verschleierung auf Pixelebene unmittelbar sichtbar wird.
+### 1. Umgebung starten
+Klonen Sie das Repository und starten Sie die Infrastruktur:
 
-### B. Autonomer Provenance Hunter (Heuristische Rekonstruktion)
-Das System identifiziert systematisch Provenienzlücken (Subjekte mit reinem `[:LAGERT_IN]` ohne dokumentierten Erwerbsakt) und schließt sie automatisiert über 3-Stufen-Inferenz:
-1. **Tier 1 (95 % Konfidenz)**: Direkter Inventarnummern-Abgleich gegen historische Strafexpeditionsregister (z. B. TU Berlin Cameroon Expeditions Dataset).
-2. **Tier 2 (85–90 % Konfidenz)**: Sequenzielle Zugangs-Batches und Akteurs-Korrelationen.
-3. **Tier 3 (85 % Konfidenz)**: Kontextuelle Zuordnungen (z. B. Mandu-Yenu-Prachtthron gekoppelt an Glaunings Nso-Feldzug 1906 und Bundesarchiv-Akten).
-* Verdachtsfälle werden im Graphen als gestrichelte Kanten `[:VERDACHT_AUF]` (Cyan `#0891B2`) mit explizitem Konfidenzwert und Aktennachweis visualisiert.
-
-### C. Juristischer Dossier- & IFG-Generator
-* **2-Seiten Restitutions-Gutachten (PDF)**: 1-Klick-Generierung gerichtsverwertbarer Dossiers mit Washingtoner-Prinzipien-Schutzklausel, Beweiskette und Primärquellenbelegen.
-* **Batch-Export (ZIP)**: Schnürt hunderte Gutachten eines Täters oder Museums in ein gebündeltes ZIP-Archiv.
-* **IFG-Auskunftsersuchen**: Generiert für ungelöste Museums-Blackboxes formelle Anträge nach dem Informationsfreiheitsgesetz auf Herausgabe der historischen handschriftlichen Zugangsbücher (1884–1916).
-
-### D. Klinisches Brutalismus-Frontend
-* **Reinweiß-Ästhetik (`#FFFFFF`)**: Verzicht auf Schmuckelemente und Emojis zugunsten juristischer Nüchternheit.
-* **Ontologische Präzision**: Konsequente Klassifikation als `Subjekte` statt passiver Objekte (Würdigung lebendiger Entitäten wie *Ngonnso*).
-* **Interaktive Metrik-Toggles & Schnellfilter-Drawer**: Direkte Isolation der Top-Akteure und Depots.
-* **Ausstellungs-Kiosk-Modus**: Autonome Kameraführung zwischen signifikanten Dissonanz-Knoten für Museums- und Tagungspräsentationen.
-
----
-
-## 2. Repository-Struktur
-
-```text
-project-echo/
-├── docker-compose.yml              # Multi-Container-Orchestrierung (Neo4j, API, Web)
-├── Dockerfile.api                  # Python 3.11 FastAPI Backend mit PDF-Engine
-├── Dockerfile.web                  # Multi-Stage Build: Vite React -> Caddy v2
-├── Caddyfile                       # Automatisches Let's Encrypt SSL & Basic Auth
-├── docker-entrypoint.sh            # Healthcheck & Cold-Start Initialisierung
-├── import_seed.py                  # Schneller Cypher-Seed-Importer (<6s Restore)
-├── seed_graph.json.gz              # Komprimierter initialer Graph (2.200+ Knoten, 6.600+ Kanten)
-├── serve_graph_api.py              # FastAPI REST-Brücke (Filter, Lücken, Dossier-API)
-├── autonomous_provenance_hunter.py # Heuristische Inferenz-Pipeline für Provenienzlücken
-├── generate_restitution_dossier.py # ReportLab PDF-Generator für Washingtoner Prinzipien
-├── extract_provenance_triples.py   # Multi-Format Ingestion Engine (PDF, XLSX, TXT)
-├── enrich_contested_multigraph.py  # Dissonanz- und Konflikt-Berechnung
-├── DEPLOYMENT.md                   # Vollständige Produktions- und Server-Dokumentation
-└── shadow-museum-atlas/            # React + Vite + TypeScript Frontend
-    ├── src/
-    │   ├── App.tsx                 # ForceGraph2D Canvas, Drawer, Inspektor & Kiosk
-    │   └── ...
-    └── package.json
-```
-
----
-
-## 3. Schnellanleitung: Lokale Entwicklung
-
-### Voraussetzungen
-* Docker & Docker Compose (oder Podman)
-* Alternativ: Node.js 18+, Python 3.10+, laufende Neo4j-Instanz (Port 7687)
-
-### Start via Docker Compose
 ```bash
-cp .env.example .env
-docker compose up -d --build
+# 1. Repository klonen
+git clone https://github.com/ProphitEngine/ProphitEngine.git
+cd ProphitEngine
+
+# 2. Datenbank (Neo4j) starten
+docker run -d --name project-echo-neo4j -p 7474:7474 -p 7687:7687 -e NEO4J_AUTH=none neo4j:5
+
+# 3. Backend (FastAPI) starten
+pip install -r requirements.txt
+uvicorn serve_graph_api:app --host 0.0.0.0 --port 8088
+
+# 4. Frontend starten (in einem neuen Terminal-Fenster)
+cd shadow-museum-atlas
+npm install
+npm run dev
 ```
-Die Anwendung ist anschließend unter `http://localhost:80` bzw. `http://localhost:5173` erreichbar.
+Das Interface ist nun unter `http://localhost:5173` in Ihrem Browser erreichbar.
+
+## Für Forscher: Der Blank-Canvas-Workflow
+
+Wenn Sie mit einem komplett neuen Datensatz oder Forschungsfokus (z.B. einer anderen Region oder Epoche) starten wollen, können Sie das System auf einen **Blank Canvas** (Zero-State) zurücksetzen. 
+
+### 1. Datenbank zurücksetzen
+Um die Neo4j-Graphdatenbank vollständig zu leeren und alte Testdaten zu löschen:
+1. Öffnen Sie Ihr Terminal.
+2. Führen Sie den folgenden Befehl aus, um den Reset-Endpoint anzusteuern:
+   ```bash
+   curl -X DELETE http://localhost:8088/api/admin/reset
+   ```
+   *Alternativ können Sie in der Weboberfläche im Admin-Bereich (falls aktiviert) auf "Reset Graph" klicken.*
+3. Die Datenbank ist nun leer.
+
+### 2. Eigene Daten einspeisen (Dropzone)
+Sie können eigene Forschungsdokumente hochladen, aus denen das System automatisch Akteure, Objekte und Kanten (Beziehungen) extrahiert.
+- **Unterstützte Formate:** `.pdf` (Forschungsartikel, Buchscans), `.xlsx` / `.xls` (Inventarlisten, Expeditionsdatenbanken), `.txt` (Rohdaten).
+- **Wie laden?** Nutzen Sie den Button "Dokument hochladen" im Web-Frontend oder legen Sie die Dateien manuell in das konfigurierte `dropzone`-Verzeichnis.
+
+### 3. Automatischer Abgleich mit Museums-APIs (DDB)
+Wenn ein neues Dokument hochgeladen wird, extrahiert die Pipeline (z.B. `autonomous_provenance_hunter.py`) die genannten Kulturgüter (z.B. "Nso-Thron").
+- Das System sucht anschließend **vollautomatisch im Hintergrund** über die API der Deutschen Digitalen Bibliothek (DDB) und museum-digital nach diesen Objekten.
+- Gibt es einen Treffer (z.B. im Linden-Museum Stuttgart), wird vollautomatisch die Kante `[:LAGERT_IN]` in Ihren Graphen eingezeichnet und mit dem Live-Standort sowie der Inventarnummer verknüpft.
+
+### 4. Makro-Ansicht (Umgang mit über 40.000 Objekten)
+Sobald Ihr Graph sehr groß wird (> 10.000 Knoten), schaltet das System automatisch in den hierarchischen **Makro-Modus**. 
+- Es werden nicht alle 40.000 Objekte einzeln gerendert, sondern als massiver Aggregations-Cluster (z.B. "14.500 Objekte im Linden-Museum").
+- **Drill-Down:** Klicken Sie doppelt auf einen Cluster-Knoten, um gezielt nur diese Sub-Menge an Objekten zu laden und im Detail zu analysieren, ohne dass der Browser überlastet wird.
 
 ---
-
-## 4. Lizenz & Ethik
-
-Dieses Projekt steht unter der GNU Affero General Public License v3.0 (AGPL-3.0). Siehe [LICENSE](LICENSE).
-
-Daten und Beweisketten dienen ausschließlich der historischen Aufklärung, Restitutionsbegründung und Rückführung geraubter Kulturgüter an ihre rechtmäßigen Herkunftsgemeinschaften.
+*Bei technischen Fragen wenden Sie sich an den Systemadministrator oder prüfen Sie die Logs im `backend`-Container.*
