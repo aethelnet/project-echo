@@ -91,6 +91,12 @@ export default function App() {
   const [isGeneratingBatch, setIsGeneratingBatch] = useState(false);
   const [batchStatus, setBatchStatus] = useState<string | null>(null);
 
+  // Diplomatic Restitution (HLKO LLM) State
+  const [isGeneratingPetition, setIsGeneratingPetition] = useState(false);
+  const [petitionStatus, setPetitionStatus] = useState<string | null>(null);
+  const [petitionDownloadUrl, setPetitionDownloadUrl] = useState<string | null>(null);
+  const [petitionJobId, setPetitionJobId] = useState<string | null>(null);
+
   // Forensic Entity Quick-Filters (Akteure & Depots)
   const [filterEntities, setFilterEntities] = useState<{ actors: any[]; institutions: any[] }>({ actors: [], institutions: [] });
   const [focusedEntity, setFocusedEntity] = useState<{ type: 'actor' | 'depot'; name: string } | null>(null);
@@ -99,6 +105,62 @@ export default function App() {
   const [sidebarTab, setSidebarTab] = useState<'actors' | 'depots' | 'gaps'>('actors');
   const [sidebarSearch, setSidebarSearch] = useState('');
   const [exclusiveCypherMode, setExclusiveCypherMode] = useState(false);
+
+  // User Annotations State (Marianne / Richard Kuration)
+  const [annotations, setAnnotations] = useState<any[]>([]);
+  const [isLoadingAnnotations, setIsLoadingAnnotations] = useState(false);
+  const [annAuthor, setAnnAuthor] = useState('Marianne');
+  const [annRole, setAnnRole] = useState('Provenance Lead');
+  const [annTags, setAnnTags] = useState('');
+  const [annNotes, setAnnNotes] = useState('');
+  const [annConfidence, setAnnConfidence] = useState('HIGH');
+  const [isSubmittingAnn, setIsSubmittingAnn] = useState(false);
+  const [annStatusMsg, setAnnStatusMsg] = useState<string | null>(null);
+
+  // Dual-Mode Guest / Researcher Authentication
+  const [isResearcher, setIsResearcher] = useState<boolean>(() => {
+    return !!localStorage.getItem('echo_researcher_token');
+  });
+  const [showLoginModal, setShowLoginModal] = useState<boolean>(false);
+  const [loginPassword, setLoginPassword] = useState<string>('');
+  const [loginError, setLoginError] = useState<string | null>(null);
+  const [isLoggingIn, setIsLoggingIn] = useState<boolean>(false);
+
+  const getAuthHeaders = useCallback(() => {
+    const token = localStorage.getItem('echo_researcher_token');
+    return token ? { 'X-Researcher-Key': token } : {};
+  }, []);
+
+  const handleLogin = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    setLoginError(null);
+    setIsLoggingIn(true);
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'marianne', password: loginPassword })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        localStorage.setItem('echo_researcher_token', loginPassword);
+        setIsResearcher(true);
+        setShowLoginModal(false);
+        setLoginPassword('');
+      } else {
+        setLoginError(data.detail || 'Ungültiges Passwort.');
+      }
+    } catch (err: any) {
+      setLoginError('Verbindungsfehler zum Auth-Gateway.');
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('echo_researcher_token');
+    setIsResearcher(false);
+  };
 
   // 1. Publikationen laden
   const loadPublications = useCallback(() => {
@@ -197,7 +259,19 @@ export default function App() {
 
           rawLinks.sort((a: any, b: any) => (typePriority[a.type] ?? 2) - (typePriority[b.type] ?? 2));
 
-          setGraphData({ nodes: data.nodes || [], links: rawLinks });
+          const rawNodes = data.nodes || [];
+          try {
+            const guestLayout = JSON.parse(localStorage.getItem('echo_guest_layout') || '{}');
+            rawNodes.forEach((n: any) => {
+              const coords = guestLayout[n.id] || guestLayout[n.name];
+              if (coords && typeof coords.x === 'number' && typeof coords.y === 'number') {
+                n.fx = coords.x;
+                n.fy = coords.y;
+              }
+            });
+          } catch (e) {}
+
+          setGraphData({ nodes: rawNodes, links: rawLinks });
         } else {
           setError("Fehler beim Laden des Beweisgraphen.");
         }
@@ -374,6 +448,31 @@ export default function App() {
   }, [publications.length]);
 
   // 4. Publikation Toggle
+  
+  const handleDeletePublication = (pubId: string) => {
+    if (!window.confirm("Bist du sicher? Die Ingestion wird restlos aus dem Graphen entfernt.")) return;
+    
+    fetch(`/api/publications/${pubId}`, { 
+      method: 'DELETE',
+      headers: { ...getAuthHeaders() }
+    })
+      .then(async res => {
+        if (res.status === 401) {
+          setShowLoginModal(true);
+          setLoginError("Forscher-Autorisierung erforderlich (Marianne).");
+          return;
+        }
+        const data = await res.json();
+        if (data.success) {
+          alert(data.message);
+          window.location.reload(); // Hard reload um D3 Graph zu refreshen
+        } else {
+          alert("Fehler: " + (data.detail || "Löschen fehlgeschlagen"));
+        }
+      })
+      .catch(err => console.error("Fehler beim Loeschen:", err));
+  };
+
   const togglePublication = (pubId: string) => {
     const next = new Set(selectedPubs);
     if (next.has(pubId)) {
@@ -428,7 +527,76 @@ export default function App() {
       });
   };
 
-  // 4.02 IFG-Auskunftsersuchen in Zwischenablage kopieren
+  // 4.02 Diplomatische HLKO Restitutions-Pipeline (Asynchrones Polling)
+  const handleGenerateLLMPetition = (institutionName: string) => {
+    setIsGeneratingPetition(true);
+    setPetitionStatus('[INITIALISIERE FORENSISCHE RESTITUTIONS-TRIAGE...]');
+    setPetitionDownloadUrl(null);
+
+    fetch('/api/petition/generate_llm', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        institution: institutionName,
+        community: null
+      })
+    })
+      .then(res => {
+        if (!res.ok) throw new Error("Restitutions-Request fehlgeschlagen");
+        return res.json();
+      })
+      .then(data => {
+        if (!data.success || !data.job_id) {
+          throw new Error(data.message || "Fehler beim Anstoßen des Auftrags");
+        }
+        setPetitionJobId(data.job_id);
+        setPetitionStatus(`[IN ARBEIT: ${data.step || 'Subsumtion läuft...'}]`);
+
+        // Polling alle 2,5 Sekunden
+        const pollInterval = setInterval(() => {
+          fetch(`/api/petition/status/${data.job_id}`)
+            .then(sRes => sRes.json())
+            .then(sData => {
+              if (sData.status === 'completed') {
+                clearInterval(pollInterval);
+                const dlUrl = sData.result?.download_zip_url || `/api/dossier/download/${sData.result?.zip_filename}`;
+                setPetitionStatus(`[FERTIG: ${sData.result?.counts?.total_extracted || 0} OBJEKTE VÖLKERRECHTLICH SUBSUMIERT & VERSIEGELT]`);
+                setPetitionDownloadUrl(dlUrl);
+                setIsGeneratingPetition(false);
+
+                // Auto-Download triggern
+                if (dlUrl) {
+                  const link = document.createElement('a');
+                  link.href = dlUrl;
+                  link.download = sData.result?.zip_filename || 'Restitutionspaket.zip';
+                  document.body.appendChild(link);
+                  link.click();
+                  document.body.removeChild(link);
+                }
+              } else if (sData.status === 'failed') {
+                clearInterval(pollInterval);
+                setPetitionStatus(`[FEHLER: ${sData.error || 'Generierung fehlgeschlagen'}]`);
+                setIsGeneratingPetition(false);
+              } else {
+                setPetitionStatus(`[STATUS: ${sData.step || 'Analysiere Graphendaten...'}]`);
+              }
+            })
+            .catch(err => {
+              console.error(err);
+              clearInterval(pollInterval);
+              setPetitionStatus('[FEHLER BEIM STATUS-POLLING]');
+              setIsGeneratingPetition(false);
+            });
+        }, 2500);
+      })
+      .catch(err => {
+        console.error(err);
+        setPetitionStatus(`[FEHLER: ${err.message || 'Verbindung zum API-Backend fehlgeschlagen'}]`);
+        setIsGeneratingPetition(false);
+      });
+  };
+
+  // 4.03 IFG-Auskunftsersuchen in Zwischenablage kopieren
   const handleCopyIFG = (invNumber: string, museum: string) => {
     const text = `Antrag nach dem Informationsfreiheitsgesetz (IFG) / Landesinformationsfreiheitsgesetz\n\nBetreff: Auskunftsersuchen zu den historischen Zugangsbüchern (1884–1916) für Inventarnummer ${invNumber}\nEmpfänger: Direktion / Provenienzforschung ${museum}\n\nSehr geehrte Damen und Herren,\n\nim Rahmen unabhängiger Provenienzrecherchen zur kolonialen Herkunft von Kulturgütern aus Kamerun beantrage ich hiermit Einsicht in die physischen bzw. digitalisierten Zugangsbücher, Inventarlisten und Akten der Jahre 1884 bis 1916 für die Inventarnummer ${invNumber}.\n\nDa in den aktuellen Bestandsdaten keinerlei historischer Erwerbsakt dokumentiert ist, ist die Einsicht in die Primärquellen zur Rekonstruktion der lückenlosen Beweiskette (Chain of Custody) zwingend erforderlich.\n\nMit freundlichen Grüßen,\nMarianne (Project Echo Provenienz-Forensik)`;
     if (navigator.clipboard) {
@@ -612,6 +780,125 @@ export default function App() {
   };
 
   // 6. File Upload Handler
+  
+  // Layout Functions
+  const handleEngineStop = useCallback(() => {
+    if (!graphData.nodes.length) return;
+    if (graphData.nodes[0].fx !== undefined) return;
+    
+    // Nur autorisierte Forscher überschreiben das Master-Layout
+    if (!localStorage.getItem('echo_researcher_token')) return;
+
+    const layout: Record<string, any> = {};
+    graphData.nodes.forEach((n: any) => {
+      layout[n.id || n] = { x: n.x, y: n.y };
+    });
+    
+    fetch('/api/graph/layout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      body: JSON.stringify(layout)
+    }).catch(err => console.error(err));
+  }, [graphData, getAuthHeaders]);
+
+  const handleNodeDragEnd = useCallback((node: any) => {
+    node.fx = node.x;
+    node.fy = node.y;
+
+    if (!localStorage.getItem('echo_researcher_token')) {
+      // Gast-Modus: Isoliert im Browser des Besuchers puffern
+      try {
+        const guestLayout = JSON.parse(localStorage.getItem('echo_guest_layout') || '{}');
+        guestLayout[node.id || node] = { x: node.x, y: node.y };
+        localStorage.setItem('echo_guest_layout', JSON.stringify(guestLayout));
+      } catch (e) {
+        console.error(e);
+      }
+      return;
+    }
+
+    // Forscher-Modus: Serverweites Master-Layout synchronisieren
+    const layout = { [node.id || node]: { x: node.x, y: node.y } };
+    fetch('/api/graph/layout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      body: JSON.stringify(layout)
+    }).catch(err => console.error(err));
+  }, [getAuthHeaders]);
+
+  const handleResetLayout = () => {
+    if (!window.confirm("Starres Layout aufheben und Physik neu berechnen?")) return;
+    if (!localStorage.getItem('echo_researcher_token')) {
+      localStorage.removeItem('echo_guest_layout');
+      window.location.reload();
+      return;
+    }
+    fetch('/api/graph/layout', { 
+      method: 'DELETE',
+      headers: { ...getAuthHeaders() }
+    }).then(() => window.location.reload());
+  };
+
+  // Edge Functions
+  const [newEdgeTarget, setNewEdgeTarget] = useState("");
+  const [newEdgeType, setNewEdgeType] = useState("RAUBTE");
+  const [newEdgeBeleg, setNewEdgeBeleg] = useState("");
+
+  const handleCreateEdge = () => {
+    if (!selectedNode || !newEdgeTarget || !newEdgeBeleg) return;
+    fetch('/api/graph/edges', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeaders()
+      },
+      body: JSON.stringify({
+        source_id: selectedNode.id,
+        target_id: newEdgeTarget,
+        rel_type: newEdgeType,
+        props: { beleg: newEdgeBeleg, publikation: 'MANUELLE_INSPEKTION' }
+      })
+    }).then(async r => {
+       if (r.status === 401) {
+         setShowLoginModal(true);
+         setLoginError("Forscher-Autorisierung erforderlich (Marianne).");
+         return;
+       }
+       if (r.ok) { window.location.reload(); }
+       else { 
+         const j = await r.json();
+         alert("Fehler: " + (j.detail || "Source/Target ungültig")); 
+       }
+    });
+  };
+
+  const handleDeleteEdge = () => {
+    if (!selectedLink) return;
+    if (!window.confirm("Relation wirklich restlos löschen?")) return;
+    const sId = typeof selectedLink.source === 'object' ? selectedLink.source.id : selectedLink.source;
+    const tId = typeof selectedLink.target === 'object' ? selectedLink.target.id : selectedLink.target;
+    
+    fetch('/api/graph/edges', {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeaders()
+      },
+      body: JSON.stringify({
+        source_id: sId,
+        target_id: tId,
+        rel_type: selectedLink.type || selectedLink.label || selectedLink.name || "UNBEKANNT"
+      })
+    }).then(async r => {
+      if (r.status === 401) {
+        setShowLoginModal(true);
+        setLoginError("Forscher-Autorisierung erforderlich (Marianne).");
+        return;
+      }
+      if (r.ok) { window.location.reload(); }
+    });
+  };
+
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
@@ -625,13 +912,24 @@ export default function App() {
 
     fetch('/api/sources/upload', {
       method: 'POST',
+      headers: {
+        ...getAuthHeaders()
+      },
       body: formData
     })
-      .then(res => {
+      .then(async res => {
+        if (res.status === 401) {
+          setShowLoginModal(true);
+          setLoginError("Forscher-Autorisierung erforderlich (Marianne).");
+          setUploadMessage("[401: AUTORISIERUNG ERFORDERLICH]");
+          setIsUploading(false);
+          return null;
+        }
         if (!res.ok) throw new Error("Upload fehlgeschlagen");
         return res.json();
       })
       .then(data => {
+        if (!data) return;
         if (data.success) {
           setUploadMessage(`[ERFOLG: ${data.triples_extracted} RELATIONEN AUS ${file.name.toUpperCase()} INJIZIERT]`);
           loadPublications();
@@ -690,6 +988,94 @@ export default function App() {
         setDossierStatus("[FEHLER BEI DER PDF-GENERIERUNG]");
         setIsGeneratingDossier(false);
       });
+  };
+
+  // 7.5 User Annotations Engine (Marianne / Richard)
+  useEffect(() => {
+    if (selectedNode && (selectedNode.type === 'Subjekt' || selectedNode.type === 'Objekt')) {
+      setIsLoadingAnnotations(true);
+      setAnnStatusMsg(null);
+      fetch(`/api/objects/${encodeURIComponent(selectedNode.id)}/annotations`)
+        .then(res => res.json())
+        .then(data => {
+          if (data && data.annotations) {
+            setAnnotations(data.annotations);
+          } else {
+            setAnnotations([]);
+          }
+        })
+        .catch(err => {
+          console.error("Error fetching annotations:", err);
+          setAnnotations([]);
+        })
+        .finally(() => setIsLoadingAnnotations(false));
+    } else {
+      setAnnotations([]);
+    }
+  }, [selectedNode]);
+
+  const handleSaveAnnotation = async () => {
+    if (!selectedNode || !annNotes.trim()) return;
+    setIsSubmittingAnn(true);
+    setAnnStatusMsg(null);
+    try {
+      const tagList = annTags.split(',').map(t => t.trim()).filter(t => t.length > 0);
+      const res = await fetch(`/api/objects/${encodeURIComponent(selectedNode.id)}/annotations`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          author: annAuthor,
+          role: annRole,
+          tags: tagList,
+          notes: annNotes,
+          confidence: annConfidence
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        const newAnn = {
+          id: data.annotation_id,
+          author: annAuthor,
+          role: annRole,
+          tags: tagList,
+          notes: annNotes,
+          confidence: annConfidence,
+          created_at: new Date().toISOString()
+        };
+        setAnnotations(prev => [newAnn, ...prev]);
+        setAnnNotes('');
+        setAnnTags('');
+        setAnnStatusMsg('[GESPEICHERT IM GRAPHEN]');
+        setTimeout(() => setAnnStatusMsg(null), 3500);
+      } else {
+        setAnnStatusMsg('[FEHLER BEIM SPEICHERN]');
+      }
+    } catch (e) {
+      console.error(e);
+      setAnnStatusMsg('[NETZWERKFEHLER]');
+    } finally {
+      setIsSubmittingAnn(false);
+    }
+  };
+
+  const handleDeleteAnnotation = async (id: string) => {
+    try {
+      const res = await fetch(`/api/annotations/${encodeURIComponent(id)}`, { 
+        method: 'DELETE',
+        headers: { ...getAuthHeaders() }
+      });
+      if (res.status === 401) {
+        setShowLoginModal(true);
+        setLoginError("Forscher-Autorisierung erforderlich (Marianne).");
+        return;
+      }
+      const data = await res.json();
+      if (data.success) {
+        setAnnotations(prev => prev.filter(a => a.id !== id));
+      }
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   // 8. Custom Node Rendering
@@ -1194,23 +1580,40 @@ export default function App() {
             {publications.map((pub: any) => {
               const isActive = selectedPubs.has(pub.id);
               return (
-                <button
-                  key={pub.id}
-                  onClick={() => togglePublication(pub.id)}
-                  title={`${pub.name} (${pub.typ}, ${pub.jahr || ''})`}
-                  style={{
-                    padding: '2px 5px',
-                    fontSize: '8px',
-                    fontWeight: 'bold',
-                    cursor: 'pointer',
-                    border: '1px solid #000000',
-                    backgroundColor: isActive ? '#000000' : '#FFFFFF',
-                    color: isActive ? '#FFFFFF' : '#64748B',
-                    textDecoration: isActive ? 'none' : 'line-through'
-                  }}
-                >
-                  [{isActive ? 'X' : ' '}] {pub.kuerzel} ({pub.edge_count})
-                </button>
+                <div key={pub.id} style={{ display: 'inline-flex', border: '1px solid #000000' }}>
+                  <button
+                    onClick={() => togglePublication(pub.id)}
+                    title={`${pub.name} (${pub.typ}, ${pub.jahr || ''})`}
+                    style={{
+                      padding: '2px 5px',
+                      fontSize: '8px',
+                      fontWeight: 'bold',
+                      cursor: 'pointer',
+                      backgroundColor: isActive ? '#000000' : '#FFFFFF',
+                      color: isActive ? '#FFFFFF' : '#64748B',
+                      border: 'none',
+                      borderRight: '1px solid #000000',
+                      textDecoration: isActive ? 'none' : 'line-through'
+                    }}
+                  >
+                    [{isActive ? 'X' : ' '}] {pub.kuerzel} ({pub.edge_count})
+                  </button>
+                  <button
+                    onClick={() => handleDeletePublication(pub.id)}
+                    title="Publikation restlos löschen"
+                    style={{
+                      padding: '2px 5px',
+                      fontSize: '8px',
+                      fontWeight: 'bold',
+                      cursor: 'pointer',
+                      backgroundColor: '#DC2626',
+                      color: '#FFFFFF',
+                      border: 'none'
+                    }}
+                  >
+                    x
+                  </button>
+                </div>
               );
             })}
           </div>
@@ -1219,6 +1622,87 @@ export default function App() {
         {/* Rechte Header-Sektion: Aktionen & Suche */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', alignItems: 'flex-end' }}>
           <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+            
+            {/* Dual-Mode Auth Status Badge */}
+            {isResearcher ? (
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '5px',
+                border: '2px solid #16A34A',
+                backgroundColor: '#F0FDF4',
+                padding: '4px 8px',
+                boxShadow: '2px 2px 0px #16A34A',
+                marginRight: '4px'
+              }}>
+                <span style={{ fontSize: '9px', fontWeight: 900, color: '#16A34A', letterSpacing: '0.5px' }}>
+                  ● [MARIANNE // VOLLZUGRIFF]
+                </span>
+                <button
+                  onClick={handleLogout}
+                  title="Ausloggen und in Gast-Modus wechseln"
+                  style={{
+                    padding: '2px 5px',
+                    fontSize: '8px',
+                    fontWeight: 'bold',
+                    backgroundColor: '#000000',
+                    color: '#FFFFFF',
+                    border: 'none',
+                    cursor: 'pointer'
+                  }}
+                >
+                  LOGOUT
+                </button>
+              </div>
+            ) : (
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '5px',
+                border: '2px solid #64748B',
+                backgroundColor: '#F8FAFC',
+                padding: '4px 8px',
+                boxShadow: '2px 2px 0px #000000',
+                marginRight: '4px'
+              }}>
+                <span style={{ fontSize: '9px', fontWeight: 900, color: '#475569', letterSpacing: '0.5px' }}>
+                  ○ [GAST // EXPLORER]
+                </span>
+                <button
+                  onClick={() => { setShowLoginModal(true); setLoginError(null); }}
+                  title="Forscher-Passwort für Vollzugriff eingeben"
+                  style={{
+                    padding: '2px 5px',
+                    fontSize: '8px',
+                    fontWeight: 'bold',
+                    backgroundColor: '#000000',
+                    color: '#FFFFFF',
+                    border: 'none',
+                    cursor: 'pointer'
+                  }}
+                >
+                  FORSCHER-LOGIN
+                </button>
+              </div>
+            )}
+
+            <button
+              onClick={handleResetLayout}
+              style={{
+                padding: '6px 8px',
+                backgroundColor: '#000000',
+                color: '#FFFFFF',
+                border: '2px solid #000000',
+                boxShadow: '2px 2px 0px #DC2626',
+                fontSize: '9px',
+                fontWeight: 'bold',
+                cursor: 'pointer',
+                marginRight: '6px'
+              }}
+            >
+              [LAYOUT RESETTEN]
+            </button>
+
             {/* View Mode Switcher: Graph vs Geo-Karte */}
             <div style={{ display: 'flex', border: '2px solid #000000', boxShadow: '2px 2px 0px #000000', marginRight: '4px' }}>
               <button
@@ -1818,7 +2302,9 @@ export default function App() {
                 setSelectedLink(null);
                 setSelectedRoute(null);
               }}
-              cooldownTicks={120}
+              onEngineStop={handleEngineStop}
+              onNodeDragEnd={handleNodeDragEnd}
+              cooldownTicks={graphData.nodes.length > 0 && graphData.nodes[0].fx !== undefined ? 0 : 120}
               d3AlphaDecay={0.02}
               d3VelocityDecay={0.3}
             />
@@ -2157,8 +2643,297 @@ export default function App() {
                   </div>
                 </div>
 
+                {/* ======================================================= */}
+                {/* MANUELLE FORSCHUNGS-ANNOTATION (MARIANNE / RICHARD)     */}
+                {/* ======================================================= */}
+                {(selectedNodeDetails && (selectedNodeDetails.type === 'Subjekt' || selectedNodeDetails.type === 'Objekt')) && (
+                  <div style={{
+                    marginBottom: '16px',
+                    border: '2px solid #059669',
+                    backgroundColor: '#ECFDF5',
+                    boxShadow: '3px 3px 0px #065F46'
+                  }}>
+                    {/* Header Bar */}
+                    <div style={{
+                      backgroundColor: '#059669',
+                      color: '#FFFFFF',
+                      padding: '8px 10px',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center'
+                    }}>
+                      <span style={{ fontSize: '10px', fontWeight: 900, letterSpacing: '0.5px' }}>
+                        [MANUELLE FORSCHUNGS-KURATION]
+                      </span>
+                      <span style={{
+                        backgroundColor: '#064E3B',
+                        color: '#A7F3D0',
+                        padding: '1px 6px',
+                        fontSize: '8px',
+                        fontWeight: 'bold',
+                        letterSpacing: '0.5px'
+                      }}>
+                        IMMUN GEGEN NLP-RE-INGEST
+                      </span>
+                    </div>
+
+                    <div style={{ padding: '10px' }}>
+                      {/* Vorhandene Annotationen */}
+                      {isLoadingAnnotations ? (
+                        <div style={{ fontSize: '9px', color: '#047857', fontStyle: 'italic', marginBottom: '8px' }}>
+                          Lade manuelle Kurationen aus Neo4j...
+                        </div>
+                      ) : annotations.length > 0 ? (
+                        <div style={{ marginBottom: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                          <div style={{ fontSize: '9px', fontWeight: 'bold', color: '#065F46' }}>
+                            VERIFIZIERTE PEER-REVIEW-EINTRÄGE ({annotations.length}):
+                          </div>
+                          {annotations.map((ann) => (
+                            <div key={ann.id} style={{
+                              border: '1px solid #A7F3D0',
+                              backgroundColor: '#FFFFFF',
+                              padding: '8px',
+                              borderLeft: '4px solid #059669',
+                              fontSize: '9px'
+                            }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                                <div>
+                                  <span style={{ fontWeight: 900, color: '#065F46' }}>{ann.author}</span>
+                                  <span style={{ color: '#64748B', marginLeft: '6px', fontSize: '8px' }}>({ann.role || 'Forscher'})</span>
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  <span style={{
+                                    backgroundColor: ann.confidence === 'HIGH' ? '#D1FAE5' : '#FEF3C7',
+                                    color: ann.confidence === 'HIGH' ? '#065F46' : '#92400E',
+                                    fontSize: '8px',
+                                    fontWeight: 'bold',
+                                    padding: '1px 4px'
+                                  }}>
+                                    {ann.confidence || 'HIGH'}
+                                  </span>
+                                  <button
+                                    onClick={() => handleDeleteAnnotation(ann.id)}
+                                    title="Annotation löschen"
+                                    style={{
+                                      background: 'none',
+                                      border: 'none',
+                                      color: '#DC2626',
+                                      fontWeight: 'bold',
+                                      cursor: 'pointer',
+                                      fontSize: '9px',
+                                      padding: '0 2px'
+                                    }}
+                                  >
+                                    [×]
+                                  </button>
+                                </div>
+                              </div>
+
+                              <div style={{ color: '#0F172A', marginTop: '4px', lineHeight: 1.4, whiteSpace: 'pre-wrap' }}>
+                                {ann.notes}
+                              </div>
+
+                              {ann.tags && ann.tags.length > 0 && (
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '6px' }}>
+                                  {ann.tags.map((t: string, idx: number) => (
+                                    <span key={idx} style={{
+                                      backgroundColor: '#D1FAE5',
+                                      color: '#065F46',
+                                      border: '1px solid #A7F3D0',
+                                      padding: '1px 5px',
+                                      fontSize: '8px',
+                                      fontWeight: 'bold'
+                                    }}>
+                                      #{t}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+
+                              <div style={{ fontSize: '7.5px', color: '#94A3B8', marginTop: '4px', textAlign: 'right' }}>
+                                {ann.created_at ? new Date(ann.created_at).toLocaleString('de-DE') : ''}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div style={{ fontSize: '8.5px', color: '#047857', fontStyle: 'italic', marginBottom: '10px' }}>
+                          Bislang keine manuelle Kuration für dieses Objekt hinterlegt.
+                        </div>
+                      )}
+
+                      {/* Neuer Eintrag Formular */}
+                      <div style={{
+                        borderTop: '1px dashed #A7F3D0',
+                        paddingTop: '8px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '6px'
+                      }}>
+                        <div style={{ fontSize: '9px', fontWeight: 'bold', color: '#064E3B' }}>
+                          NEUE ANNOTATION HINZUFÜGEN:
+                        </div>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+                          <div>
+                            <label style={{ fontSize: '8px', color: '#065F46', fontWeight: 'bold' }}>AUTOR:</label>
+                            <select
+                              value={annAuthor}
+                              onChange={e => {
+                                setAnnAuthor(e.target.value);
+                                if (e.target.value === 'Marianne') setAnnRole('Provenance Lead');
+                                else if (e.target.value === 'Richard') setAnnRole('Projektleitung');
+                                else if (e.target.value === 'Stud. Hilfskraft') setAnnRole('Recherche-Team');
+                                else setAnnRole('Gastforscher');
+                              }}
+                              style={{
+                                width: '100%',
+                                fontSize: '9px',
+                                padding: '3px 4px',
+                                border: '1px solid #059669',
+                                backgroundColor: '#FFFFFF',
+                                fontWeight: 'bold'
+                              }}
+                            >
+                              <option value="Marianne">Marianne (Provenance Lead)</option>
+                              <option value="Richard">Richard (Projektleitung)</option>
+                              <option value="Stud. Hilfskraft">Stud. Hilfskraft</option>
+                              <option value="Gastforscher">Gastforscher / Delegation</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label style={{ fontSize: '8px', color: '#065F46', fontWeight: 'bold' }}>KONFIDENZ:</label>
+                            <select
+                              value={annConfidence}
+                              onChange={e => setAnnConfidence(e.target.value)}
+                              style={{
+                                width: '100%',
+                                fontSize: '9px',
+                                padding: '3px 4px',
+                                border: '1px solid #059669',
+                                backgroundColor: '#FFFFFF'
+                              }}
+                            >
+                              <option value="HIGH">VERIFIZIERT (HIGH)</option>
+                              <option value="MEDIUM">VORLÄUFIG (MEDIUM)</option>
+                              <option value="LOW">HYPOTHESE (LOW)</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        <div>
+                          <label style={{ fontSize: '8px', color: '#065F46', fontWeight: 'bold' }}>TAGS (KOMMAGETRENNT):</label>
+                          <input
+                            type="text"
+                            placeholder="z.B. Glauning 1906, Bamum, Beutegut"
+                            value={annTags}
+                            onChange={e => setAnnTags(e.target.value)}
+                            style={{
+                              width: '100%',
+                              boxSizing: 'border-box',
+                              fontSize: '9px',
+                              padding: '4px',
+                              border: '1px solid #059669',
+                              backgroundColor: '#FFFFFF'
+                            }}
+                          />
+                        </div>
+
+                        <div>
+                          <label style={{ fontSize: '8px', color: '#065F46', fontWeight: 'bold' }}>FORSCHUNGSNOTIZ / SUBSUMTION:</label>
+                          <textarea
+                            rows={3}
+                            placeholder="Forensische Notiz, Archivbeleg, Zeugenbericht oder Kuration eintragen..."
+                            value={annNotes}
+                            onChange={e => setAnnNotes(e.target.value)}
+                            style={{
+                              width: '100%',
+                              boxSizing: 'border-box',
+                              fontSize: '9px',
+                              padding: '4px',
+                              border: '1px solid #059669',
+                              backgroundColor: '#FFFFFF',
+                              fontFamily: 'inherit'
+                            }}
+                          />
+                        </div>
+
+                        <button
+                          onClick={handleSaveAnnotation}
+                          disabled={isSubmittingAnn || !annNotes.trim()}
+                          style={{
+                            backgroundColor: !annNotes.trim() ? '#94A3B8' : '#059669',
+                            color: '#FFFFFF',
+                            border: '1px solid #000000',
+                            padding: '6px 10px',
+                            fontWeight: 'bold',
+                            fontSize: '9px',
+                            cursor: (!annNotes.trim() || isSubmittingAnn) ? 'not-allowed' : 'pointer',
+                            boxShadow: '2px 2px 0px #000000',
+                            marginTop: '2px'
+                          }}
+                        >
+                          {isSubmittingAnn ? '[SPEICHERE IM GRAPHEN...]' : '[ANNOTATION PERSISTENT IM GRAPHEN SPEICHERN]'}
+                        </button>
+
+                        {annStatusMsg && (
+                          <div style={{ fontSize: '8.5px', color: '#065F46', fontWeight: 'bold', textAlign: 'center', marginTop: '2px' }}>
+                            {annStatusMsg}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                
+                {/* MANUELLE RELATION */}
+                {(selectedNodeDetails && (selectedNodeDetails.type === 'Subjekt' || selectedNodeDetails.type === 'Objekt' || selectedNodeDetails.type === 'Institution' || selectedNodeDetails.type === 'Akteur')) && (
+                  <div style={{ marginTop: '15px', border: '2px dashed #DC2626', padding: '10px', backgroundColor: '#FEF2F2' }}>
+                    <div style={{ fontSize: '10px', fontWeight: 'bold', color: '#B91C1C', marginBottom: '8px' }}>
+                      [+ MANUELLE RELATION VERKNÜPFEN]
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                      <input 
+                        type="text" 
+                        placeholder="Ziel-Knoten ID (z.B. Hans Glauning)" 
+                        value={newEdgeTarget} 
+                        onChange={e => setNewEdgeTarget(e.target.value)} 
+                        style={{ padding: '6px', fontSize: '9px', border: '1px solid #000' }} 
+                      />
+                      <select 
+                        value={newEdgeType} 
+                        onChange={e => setNewEdgeType(e.target.value)} 
+                        style={{ padding: '6px', fontSize: '9px', border: '1px solid #000', fontWeight: 'bold' }}
+                      >
+                        <option value="RAUBTE">RAUBTE</option>
+                        <option value="SCHENKTE">SCHENKTE</option>
+                        <option value="LAGERT_IN">LAGERT_IN</option>
+                        <option value="VERKAUFTE_AN">VERKAUFTE_AN</option>
+                        <option value="UEBERGAB_AN">UEBERGAB_AN</option>
+                        <option value="ENTEIGNETE">ENTEIGNETE</option>
+                        <option value="VERDACHT_AUF">VERDACHT_AUF</option>
+                        <option value="WAR_BETEILIGT_AN">WAR_BETEILIGT_AN</option>
+                      </select>
+                      <input 
+                        type="text" 
+                        placeholder="Beleg / Aktenzeichen / Quelle" 
+                        value={newEdgeBeleg} 
+                        onChange={e => setNewEdgeBeleg(e.target.value)} 
+                        style={{ padding: '6px', fontSize: '9px', border: '1px solid #000' }} 
+                      />
+                      <button 
+                        onClick={handleCreateEdge} 
+                        style={{ padding: '8px', fontSize: '9px', fontWeight: 'bold', backgroundColor: '#DC2626', color: '#FFF', border: '2px solid #000', cursor: 'pointer', boxShadow: '2px 2px 0px #000' }}
+                      >
+                        [KANTE PERSISTENT SPEICHERN]
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 {/* Subjekt Actions: Single Dossier */}
-                {(selectedNodeDetails.type === 'Subjekt' || selectedNodeDetails.type === 'Objekt') && (
+                {(selectedNodeDetails && (selectedNodeDetails.type === 'Subjekt' || selectedNodeDetails.type === 'Objekt')) && (
                   <div style={{ borderTop: '2px solid #000000', paddingTop: '14px' }}>
                     <button
                       onClick={() => handlePrintDossier(selectedNodeDetails.id)}
@@ -2284,6 +3059,55 @@ export default function App() {
                           <div style={{ marginTop: '2px' }}><b>Hauptzulieferer:</b> {focusedSummary.top_akteure.join(', ')}</div>
                         )}
                       </div>
+                    )}
+
+                    {/* Diplomatic Restitution Package (HLKO) LLM Button */}
+                    <button
+                      onClick={() => handleGenerateLLMPetition(selectedNodeDetails.label)}
+                      disabled={isGeneratingPetition}
+                      style={{
+                        width: '100%',
+                        padding: '11px 12px',
+                        backgroundColor: '#DC2626',
+                        color: '#FFFFFF',
+                        border: '2px solid #000000',
+                        fontWeight: 900,
+                        fontSize: '9px',
+                        cursor: isGeneratingPetition ? 'wait' : 'pointer',
+                        boxShadow: '3px 3px 0px #000000',
+                        letterSpacing: '0.5px'
+                      }}
+                    >
+                      {isGeneratingPetition ? '[HLKO-PAKET WIRD ASYNCHRON GENERIERT...]' : '[DIPLOMATISCHES RESTITUTIONSPAKET (HLKO) GENERIEREN]'}
+                    </button>
+
+                    {petitionStatus && (
+                      <div style={{ fontSize: '9px', color: '#DC2626', fontWeight: 'bold', backgroundColor: '#FEF2F2', padding: '6px', border: '1px solid #DC2626', textAlign: 'center' }}>
+                        {petitionStatus}
+                      </div>
+                    )}
+
+                    {petitionDownloadUrl && (
+                      <a
+                        href={petitionDownloadUrl}
+                        download
+                        style={{
+                          display: 'block',
+                          width: '100%',
+                          padding: '8px 12px',
+                          backgroundColor: '#16A34A',
+                          color: '#FFFFFF',
+                          border: '2px solid #000000',
+                          fontWeight: 'bold',
+                          fontSize: '9px',
+                          textAlign: 'center',
+                          boxShadow: '3px 3px 0px #000000',
+                          textDecoration: 'none',
+                          boxSizing: 'border-box'
+                        }}
+                      >
+                        [RESTITUTIONSPAKET HERUNTERLADEN (ZIP)]
+                      </a>
                     )}
 
                     {/* Batch Dossier ZIP Export Button for Depot */}
@@ -2490,6 +3314,26 @@ export default function App() {
                         {dossierStatus}
                       </div>
                     )}
+
+                    <div style={{ marginTop: '10px' }}>
+                      <button
+                        onClick={handleDeleteEdge}
+                        style={{
+                          width: '100%',
+                          padding: '10px 12px',
+                          backgroundColor: '#DC2626',
+                          color: '#FFFFFF',
+                          border: '2px solid #000000',
+                          boxShadow: '3px 3px 0px #000000',
+                          fontWeight: 'bold',
+                          fontSize: '10px',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        [DIESE RELATION LÖSCHEN]
+                      </button>
+                    </div>
+
                   </div>
                 )}
               </div>
@@ -2654,6 +3498,126 @@ export default function App() {
             )}
           </aside>
         )}
+
+      {/* Brutalist Researcher Login Modal */}
+      {showLoginModal && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(0,0,0,0.65)',
+          zIndex: 99999,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          backdropFilter: 'blur(3px)'
+        }}>
+          <div style={{
+            backgroundColor: '#FFFFFF',
+            border: '3px solid #000000',
+            boxShadow: '6px 6px 0px #000000',
+            width: '90%',
+            maxWidth: '440px',
+            padding: '24px',
+            fontFamily: "'Space Mono', monospace"
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '2px solid #000000', paddingBottom: '8px' }}>
+              <div style={{ fontSize: '12px', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '1px', color: '#000000' }}>
+                [FORSCHER-AUTORISIERUNG]
+              </div>
+              <button
+                onClick={() => { setShowLoginModal(false); setLoginError(null); }}
+                style={{
+                  border: '1px solid #000000',
+                  backgroundColor: '#FFFFFF',
+                  color: '#000000',
+                  fontWeight: 'bold',
+                  cursor: 'pointer',
+                  padding: '2px 8px',
+                  fontSize: '12px'
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <p style={{ fontSize: '11px', color: '#475569', lineHeight: 1.5, marginBottom: '16px' }}>
+              Im <strong>Gast-Modus</strong> sind alle Analysen, Graph-Erkundungen, Filter, Cypher-Abfragen und Dossiers frei verfügbar. Mutierende Aktionen (Kanten anlegen/löschen, Layout festschreiben, Ingestionen) erfordern das Forscher-Passwort.
+            </p>
+
+            <form onSubmit={handleLogin}>
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{ display: 'block', fontSize: '10px', fontWeight: 'bold', textTransform: 'uppercase', marginBottom: '6px', color: '#000000' }}>
+                  Forscher-Passwort (Marianne)
+                </label>
+                <input
+                  type="password"
+                  value={loginPassword}
+                  onChange={(e) => setLoginPassword(e.target.value)}
+                  placeholder="Passwort eingeben..."
+                  autoFocus
+                  style={{
+                    width: '100%',
+                    padding: '8px 10px',
+                    border: '2px solid #000000',
+                    fontSize: '12px',
+                    fontFamily: "'Space Mono', monospace",
+                    boxSizing: 'border-box',
+                    outline: 'none'
+                  }}
+                />
+              </div>
+
+              {loginError && (
+                <div style={{
+                  padding: '8px',
+                  backgroundColor: '#FEE2E2',
+                  border: '1px solid #DC2626',
+                  color: '#DC2626',
+                  fontSize: '10px',
+                  fontWeight: 'bold',
+                  marginBottom: '16px'
+                }}>
+                  {loginError}
+                </div>
+              )}
+
+              <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                <button
+                  type="button"
+                  onClick={() => { setShowLoginModal(false); setLoginError(null); }}
+                  style={{
+                    padding: '8px 12px',
+                    backgroundColor: '#FFFFFF',
+                    border: '2px solid #000000',
+                    boxShadow: '2px 2px 0px #000000',
+                    fontSize: '10px',
+                    fontWeight: 'bold',
+                    cursor: 'pointer'
+                  }}
+                >
+                  ABBRECHEN (GAST)
+                </button>
+                <button
+                  type="submit"
+                  disabled={isLoggingIn || !loginPassword.trim()}
+                  style={{
+                    padding: '8px 14px',
+                    backgroundColor: '#000000',
+                    color: '#FFFFFF',
+                    border: '2px solid #000000',
+                    boxShadow: '2px 2px 0px #000000',
+                    fontSize: '10px',
+                    fontWeight: 'bold',
+                    cursor: (isLoggingIn || !loginPassword.trim()) ? 'not-allowed' : 'pointer'
+                  }}
+                >
+                  {isLoggingIn ? 'VERIFIZIERE...' : 'ENTSPERREN'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       </div>
     </div>

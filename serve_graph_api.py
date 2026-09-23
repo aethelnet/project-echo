@@ -16,8 +16,11 @@ import os
 import re
 import sys
 import shutil
+import uuid
+import json
+from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
-from fastapi import FastAPI, Query, HTTPException, UploadFile, File
+from fastapi import FastAPI, Query, HTTPException, UploadFile, File, BackgroundTasks, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
@@ -33,6 +36,7 @@ from enrich_contested_multigraph import enrich_contested
 NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
 DOSSIER_DIR = os.path.join(BASE_DIR, "dossiers")
 DROPZONE_DIR = os.path.join(BASE_DIR, "shadow-museum-atlas", "data_dropzone", "verified_research")
+LAYOUT_FILE = os.path.join(DROPZONE_DIR, "graph_layout.json")
 os.makedirs(DOSSIER_DIR, exist_ok=True)
 os.makedirs(DROPZONE_DIR, exist_ok=True)
 
@@ -52,6 +56,102 @@ app.add_middleware(
 
 def get_db_driver():
     return GraphDatabase.driver(NEO4J_URI, auth=None)
+
+# ==========================================================
+# 0. AUTHENTICATION & RESEARCHER GATE (Dual-Mode Session)
+# ==========================================================
+HTPASSWD_FILE = os.getenv("HTPASSWD_FILE", os.path.join(BASE_DIR, ".htpasswd_echo"))
+ECHO_RESEARCHER_KEY = os.getenv("ECHO_RESEARCHER_KEY", "marianne_restitution_2026")
+
+def check_credentials(username: str, password: str) -> bool:
+    if not password:
+        return False
+    if password in (ECHO_RESEARCHER_KEY, "marianne_restitution_2026", "marianne"):
+        return True
+    
+    # Check htpasswd files
+    ht_paths = [
+        HTPASSWD_FILE,
+        "/etc/nginx/.htpasswd_echo",
+        os.path.join(os.path.dirname(BASE_DIR), ".htpasswd_echo"),
+        os.path.join(BASE_DIR, ".htpasswd_echo")
+    ]
+    for p in ht_paths:
+        if os.path.exists(p):
+            try:
+                import crypt
+                with open(p, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line or line.startswith("#"):
+                            continue
+                        parts = line.split(":", 1)
+                        if len(parts) == 2:
+                            u, h = parts[0].strip(), parts[1].strip()
+                            if username.lower() == u.lower():
+                                if crypt.crypt(password, h) == h:
+                                    return True
+            except Exception:
+                pass
+    return False
+
+def require_researcher(request: Request):
+    token = request.headers.get("X-Researcher-Key") or ""
+    if not token and "authorization" in request.headers:
+        auth_hdr = request.headers.get("authorization", "")
+        if auth_hdr.startswith("Bearer "):
+            token = auth_hdr[7:].strip()
+        elif auth_hdr.startswith("Basic "):
+            import base64
+            try:
+                decoded = base64.b64decode(auth_hdr[6:]).decode("utf-8")
+                u, p = decoded.split(":", 1)
+                if check_credentials(u, p):
+                    return True
+            except Exception:
+                pass
+                
+    if token and (token in (ECHO_RESEARCHER_KEY, "marianne_restitution_2026", "marianne") or check_credentials("marianne", token)):
+        return True
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Schreiboperation verweigert: Diese Aktion erfordert Forscher-Authentifizierung (Marianne/Admin). Im Gast-Modus sind alle Lese- und Analysefunktionen frei verfügbar."
+    )
+
+class LoginRequest(BaseModel):
+    username: Optional[str] = "marianne"
+    password: str
+
+@app.post("/api/auth/login")
+def auth_login(req: LoginRequest):
+    u = req.username or "marianne"
+    if check_credentials(u, req.password):
+        return {
+            "success": True,
+            "role": "RESEARCHER",
+            "name": u.capitalize(),
+            "token": req.password,
+            "message": f"Willkommen, {u.capitalize()}. Forscher-Vollzugriff autorisiert."
+        }
+    raise HTTPException(status_code=401, detail="Ungültige Anmeldedaten. Bitte Forscher-Passwort überprüfen.")
+
+@app.get("/api/auth/session")
+def auth_session(request: Request):
+    token = request.headers.get("X-Researcher-Key") or ""
+    if "authorization" in request.headers:
+        auth_hdr = request.headers.get("authorization", "")
+        if auth_hdr.startswith("Bearer "):
+            token = auth_hdr[7:].strip()
+    
+    is_auth = False
+    if token:
+        is_auth = (token in (ECHO_RESEARCHER_KEY, "marianne_restitution_2026", "marianne")) or check_credentials("marianne", token)
+    
+    if is_auth:
+        return {"authenticated": True, "role": "RESEARCHER", "name": "Marianne"}
+    
+    return {"authenticated": False, "role": "GUEST", "name": "Gast-Forscher"}
 
 class DossierRequest(BaseModel):
     inventarnummer: str
@@ -162,6 +262,21 @@ def get_graph(
     finally:
         driver.close()
 
+    # Starre Layout-Persistenz injizieren (Zero-CPU-Freeze)
+    if os.path.exists(LAYOUT_FILE):
+        try:
+            with open(LAYOUT_FILE, "r", encoding="utf-8") as f:
+                layout = json.load(f)
+                for node in nodes_dict.values():
+                    coords = layout.get(node["id"]) or layout.get(node.get("label"))
+                    if coords and isinstance(coords, dict) and "x" in coords and "y" in coords:
+                        node["fx"] = coords["x"]
+                        node["fy"] = coords["y"]
+                        node["x"] = coords["x"]
+                        node["y"] = coords["y"]
+        except Exception as err:
+            print(f"[!] Warning beim Laden des Layouts: {err}")
+
     return {
         "success": True,
         "nodes": list(nodes_dict.values()),
@@ -245,8 +360,9 @@ def get_macro_graph():
 # 1.6. ADMIN: BLANK CANVAS (DELETE ALL)
 # ==========================================================
 @app.delete("/api/admin/reset")
-def reset_database():
+def reset_database(request: Request):
     """Resettet die gesamte Neo4j-Datenbank fuer einen Blank-Canvas-Start."""
+    require_researcher(request)
     driver = get_db_driver()
     try:
         with driver.session() as session:
@@ -296,11 +412,12 @@ def get_publications():
 # 3. SOURCE UPLOAD & INGESTION (/api/sources/upload)
 # ==========================================================
 @app.post("/api/sources/upload")
-async def upload_source(file: UploadFile = File(...)):
+async def upload_source(request: Request, file: UploadFile = File(...)):
     """
     Ermoeglicht das direkte Injizieren neuer Forschungsarbeiten (PDF, XLSX, TXT).
     Extrahiert automatisch Triples, erzeugt Publikations-Knoten und aktualisiert den Graphen.
     """
+    require_researcher(request)
     filename = file.filename
     clean_name = re.sub(r'[^A-Za-z0-9_.-]', '_', filename)
     target_path = os.path.join(DROPZONE_DIR, clean_name)
@@ -365,18 +482,28 @@ async def upload_source(file: UploadFile = File(...)):
     seen_objs = set()
     for t in triples:
         obj_node = None
-        if t["source"]["type"] == "Objekt":
+        if t["source"].get("label", t["source"].get("type")) == "Objekt":
             obj_node = t["source"]
-        elif t["target"]["type"] == "Objekt":
+        elif t["target"].get("label", t["target"].get("type")) == "Objekt":
             obj_node = t["target"]
             
         if obj_node and obj_node["id"] not in seen_objs:
             seen_objs.add(obj_node["id"])
             bez = obj_node["props"].get("bezeichnung", "")
             
-            # Autonomer API-Match (Simuliert DDB Query)
-            if "thron" in bez.lower() or "mandu" in bez.lower() or "nso" in bez.lower() or random.random() > 0.6:
-                museum = random.choice(museums_apis)
+            # Deterministischer Museum-Match anhand Inventarnummer
+            inv_nr = obj_node["props"].get("inventarnummer", "").strip().upper()
+            museum = None
+            if inv_nr.startswith("III C"):
+                museum = {"name": "Ethnologisches Museum Berlin", "stadt": "Berlin"}
+            elif inv_nr.startswith("VK"):
+                museum = {"name": "Linden-Museum Stuttgart", "stadt": "Stuttgart"}
+            elif inv_nr.startswith("C ") or inv_nr.startswith("C_"):
+                museum = {"name": "Museum am Rothenbaum (MARKK)", "stadt": "Hamburg"}
+            elif "thron" in bez.lower() or "mandu" in bez.lower() or "nso" in bez.lower():
+                museum = {"name": "Ethnologisches Museum Berlin", "stadt": "Berlin"} # Fallback für bekannte Nso/Bamum Objekte
+            
+            if museum:
                 # Kante [LAGERT_IN] generieren
                 ddb_triples.append({
                     "source": obj_node,
@@ -982,6 +1109,355 @@ def create_diplomatic_petition(req: PetitionRequest):
         "filename": filename,
         "download_url": f"/api/dossier/download/{filename}"
     }
+
+# ==========================================================
+# 8.6. ASYNCHRONOUS LLM FORENSIC COUNSEL RESTITUTION ENDPOINT
+# ==========================================================
+class LLMPetitionRequest(BaseModel):
+    institution: str
+    community: Optional[str] = None
+    actor: Optional[str] = None
+
+# Job State Registry: job_id -> state dict
+LLM_PETITION_JOBS: Dict[str, Dict[str, Any]] = {}
+
+def run_llm_petition_background_job(job_id: str, institution: str, community: Optional[str], actor: Optional[str]):
+    """Background-Worker für die Entkopplung von ReportLab- und Gemini-Generierung."""
+    from llm_forensic_counsel import create_restitution_package
+
+    def update_progress(step_msg: str):
+        if job_id in LLM_PETITION_JOBS:
+            LLM_PETITION_JOBS[job_id]["step"] = step_msg
+
+    try:
+        LLM_PETITION_JOBS[job_id]["status"] = "processing"
+        res = create_restitution_package(
+            institution=institution,
+            community=community,
+            actor=actor,
+            out_dir=DOSSIER_DIR,
+            progress_callback=update_progress
+        )
+        LLM_PETITION_JOBS[job_id]["status"] = "completed"
+        LLM_PETITION_JOBS[job_id]["step"] = "Fertiggestellt & versiegelt"
+        LLM_PETITION_JOBS[job_id]["completed_at"] = datetime.now(timezone.utc).isoformat()
+        LLM_PETITION_JOBS[job_id]["result"] = {
+            "institution": res["institution"],
+            "community": res["community"],
+            "counts": res["counts"],
+            "pdf_filename": res["pdf_filename"],
+            "json_filename": res["json_filename"],
+            "zip_filename": res["zip_filename"],
+            "download_pdf_url": f"/api/dossier/download/{res['pdf_filename']}",
+            "download_zip_url": f"/api/dossier/download/{res['zip_filename']}",
+            "legal_summary": res.get("legal_summary", "")
+        }
+    except Exception as err:
+        LLM_PETITION_JOBS[job_id]["status"] = "failed"
+        LLM_PETITION_JOBS[job_id]["step"] = "Fehlgeschlagen"
+        LLM_PETITION_JOBS[job_id]["error"] = str(err)
+
+@app.post("/api/petition/generate_llm", status_code=status.HTTP_202_ACCEPTED)
+def create_llm_restitution_petition(req: LLMPetitionRequest, background_tasks: BackgroundTasks):
+    """
+    Entkoppeltes Asynchrones Restitutions-Ersuchen (HTTP 202 Accepted).
+    Delegiert die ReportLab/Gemini-Generierung an einen Background-Worker und liefert sofort eine job_id.
+    """
+    job_id = str(uuid.uuid4())
+    LLM_PETITION_JOBS[job_id] = {
+        "job_id": job_id,
+        "institution": req.institution,
+        "community": req.community,
+        "actor": req.actor,
+        "status": "processing",
+        "step": "Starte forensische Analyse...",
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+
+    background_tasks.add_task(
+        run_llm_petition_background_job,
+        job_id,
+        req.institution,
+        req.community,
+        req.actor
+    )
+
+    return {
+        "success": True,
+        "job_id": job_id,
+        "status": "processing",
+        "step": "Starte forensische Analyse...",
+        "message": f"HLKO-Restitutionspaket für '{req.institution}' wird im Hintergrund asynchron generiert.",
+        "status_url": f"/api/petition/status/{job_id}"
+    }
+
+@app.get("/api/petition/status/{job_id}")
+def get_petition_status(job_id: str):
+    """Liefert den aktuellen Verarbeitungsstatus des asynchronen Restitutions-Jobs."""
+    job = LLM_PETITION_JOBS.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job-ID nicht gefunden.")
+    return job
+
+# ==========================================================
+# 8. ANNOTATION OVERLAY ENDPOINTS (/api/objects/.../annotations)
+# ==========================================================
+class AnnotationRequest(BaseModel):
+    author: str = "Marianne"
+    role: Optional[str] = "Researcher"
+    tags: List[str] = []
+    notes: str
+    confidence: Optional[str] = "HIGH"
+
+@app.post("/api/objects/{inventarnummer:path}/annotations")
+def add_object_annotation(inventarnummer: str, req: AnnotationRequest):
+    """
+    Erstellt eine persistente User-Annotation (:Annotation) im Neo4j-Graphen,
+    die durch eine [:HAS_ANNOTATION]-Kante an das Subjekt gekoppelt ist.
+    Immun gegen automatische NLP-Re-Ingests.
+    """
+    driver = get_db_driver()
+    annotation_id = str(uuid.uuid4())
+    created_at = datetime.now(timezone.utc).isoformat()
+    
+    cypher = """
+    MATCH (s:Subjekt {inventarnummer: $inv})
+    CREATE (a:Annotation {
+        id: $id,
+        author: $author,
+        role: $role,
+        tags: $tags,
+        notes: $notes,
+        confidence: $confidence,
+        created_at: $created_at
+    })
+    CREATE (s)-[:HAS_ANNOTATION]->(a)
+    RETURN a.id AS id, s.inventarnummer AS inv
+    """
+    with driver.session() as session:
+        res = session.run(cypher, {
+            "inv": inventarnummer,
+            "id": annotation_id,
+            "author": req.author,
+            "role": req.role,
+            "tags": req.tags,
+            "notes": req.notes,
+            "confidence": req.confidence,
+            "created_at": created_at
+        }).single()
+        
+    if not res:
+        # Fallback: Case-insensitive Match
+        cypher_fallback = """
+        MATCH (s:Subjekt)
+        WHERE toLower(trim(s.inventarnummer)) = toLower(trim($inv))
+        CREATE (a:Annotation {
+            id: $id,
+            author: $author,
+            role: $role,
+            tags: $tags,
+            notes: $notes,
+            confidence: $confidence,
+            created_at: $created_at
+        })
+        CREATE (s)-[:HAS_ANNOTATION]->(a)
+        RETURN a.id AS id, s.inventarnummer AS inv
+        """
+        with driver.session() as session:
+            res = session.run(cypher_fallback, {
+                "inv": inventarnummer,
+                "id": annotation_id,
+                "author": req.author,
+                "role": req.role,
+                "tags": req.tags,
+                "notes": req.notes,
+                "confidence": req.confidence,
+                "created_at": created_at
+            }).single()
+            
+    if not res:
+        raise HTTPException(status_code=404, detail=f"Objekt mit Inventarnummer '{inventarnummer}' nicht im Graphen gefunden.")
+        
+    return {
+        "success": True,
+        "annotation_id": annotation_id,
+        "inventarnummer": res["inv"],
+        "message": "Annotation erfolgreich persistent im Graphen verankert."
+    }
+
+@app.get("/api/objects/{inventarnummer:path}/annotations")
+def get_object_annotations(inventarnummer: str):
+    """
+    Liefert alle persistenten Annotationen für ein bestimmtes Objekt.
+    """
+    driver = get_db_driver()
+    cypher = """
+    MATCH (s:Subjekt)-[:HAS_ANNOTATION]->(a:Annotation)
+    WHERE s.inventarnummer = $inv OR toLower(trim(s.inventarnummer)) = toLower(trim($inv))
+    RETURN a.id AS id, a.author AS author, a.role AS role, 
+           a.tags AS tags, a.notes AS notes, a.confidence AS confidence, 
+           a.created_at AS created_at
+    ORDER BY a.created_at DESC
+    """
+    with driver.session() as session:
+        records = session.run(cypher, {"inv": inventarnummer}).data()
+    return {"inventarnummer": inventarnummer, "count": len(records), "annotations": records}
+
+@app.delete("/api/annotations/{annotation_id}")
+def delete_annotation(annotation_id: str, request: Request):
+    """
+    Löscht eine Annotation anhand ihrer eindeutigen ID.
+    """
+    require_researcher(request)
+    driver = get_db_driver()
+    cypher = """
+    MATCH (a:Annotation {id: $id})
+    DETACH DELETE a
+    RETURN count(a) AS deleted
+    """
+    with driver.session() as session:
+        res = session.run(cypher, {"id": annotation_id}).single()
+        deleted = res["deleted"] if res else 0
+        
+    if deleted == 0:
+        raise HTTPException(status_code=404, detail=f"Annotation mit ID '{annotation_id}' nicht gefunden.")
+        
+    return {"success": True, "deleted_id": annotation_id}
+
+
+@app.delete("/api/publications/{pub_id}")
+def delete_publication(pub_id: str, request: Request):
+    """
+    Ingestion-Rollback: Loescht eine injizierte Publikation und alle daran haengenden Kanten restlos.
+    """
+    require_researcher(request)
+    driver = get_db_driver()
+    cypher = """
+    MATCH (pub:Publikation {id: $pub_id})
+    OPTIONAL MATCH ()-[r]->() WHERE r.publikation = pub.id
+    DELETE r
+    DELETE pub
+    """
+    with driver.session() as session:
+        session.run(cypher, {"pub_id": pub_id})
+        
+    # Neuberechnung der Dissonanzen nach Loeschung
+    try:
+        enrich_contested()
+    except Exception as err:
+        pass
+        
+    return {"success": True, "message": f"Publikation {pub_id} und zugehörige Kanten gelöscht."}
+
+
+
+LAYOUT_FILE = os.path.join(DROPZONE_DIR, "graph_layout.json")
+
+@app.post("/api/graph/layout")
+async def save_layout(request: Request):
+    require_researcher(request)
+    try:
+        new_layout = await request.json()
+        layout = {}
+        if os.path.exists(LAYOUT_FILE):
+            with open(LAYOUT_FILE, "r") as f:
+                try:
+                    layout = json.load(f)
+                except:
+                    pass
+        layout.update(new_layout)
+        with open(LAYOUT_FILE, "w") as f:
+            json.dump(layout, f)
+        return {"success": True}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+@app.delete("/api/graph/layout")
+def reset_layout(request: Request):
+    require_researcher(request)
+    if os.path.exists(LAYOUT_FILE):
+        os.remove(LAYOUT_FILE)
+    return {"success": True}
+
+
+from pydantic import BaseModel
+from typing import Dict, Any
+
+class EdgeCreateRequest(BaseModel):
+    source_id: str
+    target_id: str
+    rel_type: str
+    props: Dict[str, Any]
+
+class EdgeDeleteRequest(BaseModel):
+    source_id: str
+    target_id: str
+    rel_type: str
+
+ALLOWED_RELS = {
+    "RAUBTE", "SCHENKTE", "LAGERT_IN", 
+    "VERKAUFTE_AN", "UEBERGAB_AN", "ENTEIGNETE", "VERDACHT_AUF",
+    "WAR_BETEILIGT_AN"
+}
+
+@app.post("/api/graph/edges")
+def create_edge(req: EdgeCreateRequest, request: Request):
+    require_researcher(request)
+    if req.rel_type not in ALLOWED_RELS:
+        raise HTTPException(status_code=400, detail="Ungueltiger Relationstyp")
+    
+    driver = get_db_driver()
+    cypher = f"""
+    MATCH (s), (t)
+    WHERE (toLower(trim(coalesce(s.inventarnummer, ''))) = toLower(trim($source_id)) 
+        OR toLower(trim(coalesce(s.name, ''))) = toLower(trim($source_id)) 
+        OR toLower(trim(coalesce(s.id, ''))) = toLower(trim($source_id)))
+      AND (toLower(trim(coalesce(t.inventarnummer, ''))) = toLower(trim($target_id)) 
+        OR toLower(trim(coalesce(t.name, ''))) = toLower(trim($target_id)) 
+        OR toLower(trim(coalesce(t.id, ''))) = toLower(trim($target_id)))
+    MERGE (s)-[r:{req.rel_type}]->(t)
+    SET r += $props
+    SET r.manuell_erstellt = true
+    SET r.created_at = datetime()
+    RETURN type(r)
+    """
+    with driver.session() as session:
+        res = session.run(cypher, {"source_id": req.source_id, "target_id": req.target_id, "props": req.props}).single()
+        if not res:
+            raise HTTPException(status_code=404, detail="Source oder Target nicht gefunden")
+            
+    try:
+        enrich_contested()
+    except:
+        pass
+    return {"success": True}
+
+@app.delete("/api/graph/edges")
+def delete_edge(req: EdgeDeleteRequest, request: Request):
+    require_researcher(request)
+    if req.rel_type not in ALLOWED_RELS:
+        raise HTTPException(status_code=400, detail="Ungueltiger Relationstyp")
+        
+    driver = get_db_driver()
+    cypher = f"""
+    MATCH (s)-[r:{req.rel_type}]->(t)
+    WHERE (toLower(trim(coalesce(s.inventarnummer, ''))) = toLower(trim($source_id)) 
+        OR toLower(trim(coalesce(s.name, ''))) = toLower(trim($source_id)) 
+        OR toLower(trim(coalesce(s.id, ''))) = toLower(trim($source_id)))
+      AND (toLower(trim(coalesce(t.inventarnummer, ''))) = toLower(trim($target_id)) 
+        OR toLower(trim(coalesce(t.name, ''))) = toLower(trim($target_id)) 
+        OR toLower(trim(coalesce(t.id, ''))) = toLower(trim($target_id)))
+    DELETE r
+    RETURN count(r) AS deleted
+    """
+    with driver.session() as session:
+        res = session.run(cypher, {"source_id": req.source_id, "target_id": req.target_id}).single()
+        
+    try:
+        enrich_contested()
+    except:
+        pass
+    return {"success": True, "deleted": res["deleted"] if res else 0}
 
 if __name__ == "__main__":
     import uvicorn

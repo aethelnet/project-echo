@@ -37,41 +37,41 @@ h1, h2, h3, h4, h5, h6 {
 /* ========================================================= */
 @media (max-width: 768px) {
   .app-header {
-
     flex-direction: row !important;
-
     align-items: center !important;
-
-    height: 60px !important;
-
-    padding: 8px 12px !important;
-
-    gap: 16px !important;
-
+    height: 56px !important;
+    padding: 6px 12px !important;
+    gap: 12px !important;
     overflow-x: auto !important;
-
+    overflow-y: hidden !important;
     -webkit-overflow-scrolling: touch;
-
+    scrollbar-width: none;
   }
-
+  .app-header::-webkit-scrollbar {
+    display: none;
+  }
+  
   .app-header > div {
-
     flex-direction: row !important;
-
     flex-wrap: nowrap !important;
-
     max-width: none !important;
-
     align-items: center !important;
-
+    flex-shrink: 0 !important;
+    gap: 8px !important;
+  }
+  
+  .app-header > div > div {
+    flex-wrap: nowrap !important;
+    white-space: nowrap !important;
+    flex-shrink: 0 !important;
+    gap: 6px !important;
   }
 
-  .app-header > div > div {
-
-    flex-wrap: nowrap !important;
-
+  .app-header button,
+  .app-header span,
+  .app-header input {
+    flex-shrink: 0 !important;
     white-space: nowrap !important;
-
   }
   
   .app-workspace {

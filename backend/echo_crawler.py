@@ -42,7 +42,8 @@ def fetch_looted_artifacts():
         print(f"[ECHO CRAWLER] Successfully traced {len(artifacts)} cultural artifacts.")
         
         # Save to JSON for the frontend
-        output_path = "/home/ubuntu/auratic-systems-prime/frontend/echo_live_data.json"
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        output_path = os.getenv("ECHO_LIVE_DATA_PATH", os.path.join(base_dir, "echo_live_data.json"))
         with open(output_path, 'w') as f:
             json.dump(artifacts, f, indent=4)
             

@@ -31,10 +31,11 @@ except ImportError:
     openpyxl = None
 
 # Standardpfade
-DEFAULT_ATLAS_PATH = "/home/ubuntu/auratic-systems-prime/shadow-museum-atlas/data_dropzone/verified_research/atlas_der_abwesenheit.txt"
-DEFAULT_PAPERS_DIR = "/home/ubuntu/auratic-systems-prime/papers_richard"
-EXPORT_JSON_PATH = "/home/ubuntu/auratic-systems-prime/provenance_triples_extracted.json"
-EXPORT_CQL_PATH = "/home/ubuntu/auratic-systems-prime/provenance_ingestion.cql"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DEFAULT_ATLAS_PATH = os.getenv("ATLAS_TXT_PATH", os.path.join(BASE_DIR, "shadow-museum-atlas", "data_dropzone", "verified_research", "atlas_der_abwesenheit.txt"))
+DEFAULT_PAPERS_DIR = os.getenv("PAPERS_DIR", os.path.join(BASE_DIR, "papers"))
+EXPORT_JSON_PATH = os.getenv("EXPORT_JSON_PATH", os.path.join(BASE_DIR, "provenance_triples_extracted.json"))
+EXPORT_CQL_PATH = os.getenv("EXPORT_CQL_PATH", os.path.join(BASE_DIR, "provenance_ingestion.cql"))
 
 # ==========================================================
 # 1. NEO4J CLIENT & SCHEMA LOCKDOWN

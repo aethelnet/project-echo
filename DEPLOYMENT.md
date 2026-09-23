@@ -81,7 +81,7 @@ Kopiere den ausgegebenen Hash (z. B. `JDJhJDEwJE9u...`) und trage ihn in `.env` 
 AUTH_HASH=JDJhJDEwJE9u...
 ```
 
-Aktiviere in [`Caddyfile`](file:///home/ubuntu/auratic-systems-prime/Caddyfile) den `basicauth`-Block:
+Aktiviere in [`Caddyfile`](Caddyfile) den `basicauth`-Block:
 ```caddyfile
     basicauth / {
         {$AUTH_USER:marianne} {$AUTH_HASH}
@@ -100,7 +100,7 @@ docker compose up -d --build
 1. **Neo4j Container (`echo_neo4j`):** Startet mit 4 GB Java Heap und 2 GB Pagecache.
 2. **FastAPI Container (`echo_api`):**
    - Wartet auf den Bolt-Port `7687`.
-   - Erkennt eine leere Datenbank und importiert in **unter 6 Sekunden** die 2.223 Knoten und 6.628 Relationen aus [`seed_graph.json.gz`](file:///home/ubuntu/auratic-systems-prime/seed_graph.json.gz).
+   - Erkennt eine leere Datenbank und importiert in **unter 6 Sekunden** die 2.223 Knoten und 6.628 Relationen aus [`seed_graph.json.gz`](seed_graph.json.gz).
    - Startet den API-Server auf Port `8088`.
 3. **Web Container (`echo_web` - Caddy):**
    - Kompiliert das React/Vite Frontend im Multi-Stage-Build.

@@ -19,8 +19,9 @@ except ImportError:
     print("[-] reportlab nicht installiert! Bitte 'pip install reportlab' ausfuehren.")
     exit(1)
 
-NEO4J_URI = "bolt://localhost:7687"
-DOSSIER_DIR = "/home/ubuntu/auratic-systems-prime/shadow-museum-atlas/data_dropzone/dossiers"
+NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DOSSIER_DIR = os.getenv("DOSSIER_DIR", os.path.join(BASE_DIR, "shadow-museum-atlas", "data_dropzone", "dossiers"))
 
 def query_stolen_objects(institution: str, community: str = "Nso"):
     """

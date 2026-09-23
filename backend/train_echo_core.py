@@ -14,8 +14,9 @@ logger = logging.getLogger("Echo-Ouroboros")
 from echo_lgnn_tensor import EchoProphitNet, liquid_entropy_loss
 
 # Config
-PDF_PATH = "/home/ubuntu/Downloads/arthistoricum-1219-978-3-98501-203-9.pdf"
-WEIGHTS_PATH = "/home/ubuntu/auratic-systems-prime/backend/lgnn/weights/echo_tensor_core_v1.pth"
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PDF_PATH = os.getenv("ECHO_PDF_PATH", os.path.join(BASE_DIR, "data", "atlas_der_abwesenheit.pdf"))
+WEIGHTS_PATH = os.getenv("ECHO_WEIGHTS_PATH", os.path.join(BASE_DIR, "model", "echo_tensor_core_v1.pth"))
 MET_SEARCH_URL = "https://collectionapi.metmuseum.org/public/collection/v1/search"
 MET_OBJECT_URL = "https://collectionapi.metmuseum.org/public/collection/v1/objects/"
 

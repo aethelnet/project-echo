@@ -24,10 +24,11 @@ try:
     import os
     # all-MiniLM-L6-v2 produces 384-dim embeddings
     lgnn_model = EchoProphitNet(embedding_dim=384)
-    weights_path = "/home/ubuntu/auratic-systems-prime/backend/lgnn/weights/echo_tensor_core_v1.pth"
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    weights_path = os.getenv("ECHO_WEIGHTS_PATH", os.path.join(base_dir, "model", "echo_tensor_core_v1.pth"))
     if os.path.exists(weights_path):
         lgnn_model.load_state_dict(torch.load(weights_path, weights_only=True))
-        print("[Echo Tensor] Loaded highly trained LGNN Ouroboros weights!")
+        print("[Echo Tensor] Loaded trained LGNN weights!")
     lgnn_model.eval() # Set to evaluation mode
 except Exception as e:
     print(f"[Echo Error] Failed to load LGNN Tensor Core: {e}")
