@@ -11,8 +11,7 @@ input:focus, button:focus, textarea:focus {
 }
 
 button:hover {
-  background-color: #000 !important;
-  color: #FFF !important;
+  opacity: 0.88;
 }
 
 /* Scrollbar Brutalism */
