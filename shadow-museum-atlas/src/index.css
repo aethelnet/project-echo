@@ -35,43 +35,24 @@ h1, h2, h3, h4, h5, h6 {
 /* ========================================================= */
 /* MOBILE RESPONSIVENESS & TOUCH PHYSICS (UNIT 734 PATCH)    */
 /* ========================================================= */
-@media (max-width: 768px) {
-  .app-header {
-    flex-direction: row !important;
-    align-items: center !important;
-    height: 56px !important;
-    padding: 6px 12px !important;
-    gap: 12px !important;
-    overflow-x: auto !important;
-    overflow-y: hidden !important;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
-  }
-  .app-header::-webkit-scrollbar {
-    display: none;
-  }
-  
-  .app-header > div {
-    flex-direction: row !important;
-    flex-wrap: nowrap !important;
-    max-width: none !important;
-    align-items: center !important;
-    flex-shrink: 0 !important;
-    gap: 8px !important;
-  }
-  
-  .app-header > div > div {
-    flex-wrap: nowrap !important;
-    white-space: nowrap !important;
-    flex-shrink: 0 !important;
-    gap: 6px !important;
-  }
+.desktop-header {
+  display: flex !important;
+  flex-direction: column !important;
+  width: 100% !important;
+}
 
-  .app-header button,
-  .app-header span,
-  .app-header input {
-    flex-shrink: 0 !important;
-    white-space: nowrap !important;
+.mobile-header {
+  display: none !important;
+}
+
+@media (max-width: 900px) {
+  .desktop-header {
+    display: none !important;
+  }
+  .mobile-header {
+    display: flex !important;
+    flex-direction: column !important;
+    width: 100% !important;
   }
   
   .app-workspace {
@@ -88,18 +69,17 @@ h1, h2, h3, h4, h5, h6 {
     flex: none !important;
   }
   
-  /* The second aside (which gets classed as left-sidebar by accident) needs to be fixed.
-     Actually, any aside that isn't hidden is the inspector. Let's just target it. */
-  aside[style*="borderLeft"], aside[style*="border-left"] {
+  .inspector-aside, aside[style*="borderLeft"], aside[style*="border-left"] {
     position: fixed !important;
     bottom: 0 !important;
     left: 0 !important;
     width: 100% !important;
-    height: 60vh !important;
+    height: 65vh !important;
     border-left: none !important;
     border-top: 4px solid #000000 !important;
     z-index: 1000 !important;
-    box-shadow: 0px -4px 10px rgba(0,0,0,0.3) !important;
+    box-shadow: 0px -6px 20px rgba(0,0,0,0.35) !important;
+    background-color: #FFFFFF !important;
   }
 
   /* HUD Collapse: Hide the floating legends */

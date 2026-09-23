@@ -33,6 +33,9 @@ export default function App() {
   const [ghostMode, setGhostMode] = useState(false);
   const [ghostIds, setGhostIds] = useState<Set<string>>(new Set());
 
+  // Mobile Navigation Drawer State
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
   // Contested Mode (Multigraph Kollisionen: Schenkung vs. Raub)
   const [contestedIds, setContestedIds] = useState<Set<string>>(new Set());
   const [contestedMap, setContestedMap] = useState<Record<string, any>>({});
@@ -1402,464 +1405,842 @@ export default function App() {
     <div className="app-root" style={{ width: '100vw', height: '100vh', backgroundColor: '#FFFFFF', display: 'flex', flexDirection: 'column', overflow: 'hidden', fontFamily: "'Space Mono', monospace" }}>
       
       {/* 1. TOP HEADER (Fixed in document flow, full width) */}
-      <header className="app-header" style={{ width: '100%', borderBottom: '3px solid #000000', backgroundColor: '#FFFFFF', padding: '10px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 60, flexShrink: 0, boxSizing: 'border-box' }}>
-        
-        {/* Linke Header-Sektion: Titel, Metriken, Quellen */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxWidth: '74%' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-            <span style={{ backgroundColor: '#000000', color: '#FFFFFF', padding: '2px 8px', fontWeight: 'bold', fontSize: '10px', letterSpacing: '1px' }}>
-              PROJECT ECHO
-            </span>
-            <span style={{ fontSize: '10px', color: '#475569', fontWeight: 'bold', letterSpacing: '0.5px' }}>
-              RESTITUTION PROVENANCE KNOWLEDGE GRAPH
-            </span>
-            <span style={{ fontSize: '13px', fontWeight: 900, letterSpacing: '-0.5px', color: '#000000', marginLeft: '4px' }}>
-              SHADOW MUSEUM ATLAS
-            </span>
-          </div>
+      <header className="app-header" style={{ width: '100%', borderBottom: '3px solid #000000', backgroundColor: '#FFFFFF', zIndex: 60, flexShrink: 0, boxSizing: 'border-box' }}>
+        {/* Hidden File Input for Ingestion */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".pdf,.xlsx,.xls,.txt,.csv"
+          onChange={handleFileUpload}
+          style={{ display: 'none' }}
+        />
 
-          {/* Metrik-Schalter */}
-          <div style={{ display: 'flex', gap: '5px', alignItems: 'center', flexWrap: 'wrap' }}>
-            <button
-              onClick={() => handleMetricToggle('subjekte')}
-              title="Klicken zum Isolieren aller Subjekte / Kulturgüter"
-              style={{
-                backgroundColor: activeMetricFilter === 'subjekte' ? '#000000' : '#F1F5F9',
-                color: activeMetricFilter === 'subjekte' ? '#FFFFFF' : '#000000',
-                border: '2px solid #000000',
-                padding: '3px 7px',
-                fontSize: '9px',
-                fontWeight: 'bold',
-                cursor: 'pointer',
-                boxShadow: activeMetricFilter === 'subjekte' ? '2px 2px 0px #000000' : 'none'
-              }}
-            >
-              {stats.subjekte.toLocaleString()} SUBJEKTE
-            </button>
+        {/* ========================================================= */}
+        {/* DESKTOP HEADER (2-TIER ARCHITECTURAL LAYOUT)               */}
+        {/* ========================================================= */}
+        <div className="desktop-header">
+          {/* TIER 1: BRAND, VIEWS, ACTIONS, SEARCH, AUTH */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 18px', borderBottom: '1px solid #E2E8F0', gap: '12px', flexWrap: 'wrap' }}>
+            {/* Left: Brand & View Switcher */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ backgroundColor: '#000000', color: '#FFFFFF', padding: '2px 8px', fontWeight: 'bold', fontSize: '10px', letterSpacing: '1px' }}>
+                  PROJECT ECHO
+                </span>
+                <span style={{ fontSize: '10px', color: '#475569', fontWeight: 'bold', letterSpacing: '0.5px' }}>
+                  RESTITUTION PROVENANCE KNOWLEDGE GRAPH
+                </span>
+                <span style={{ fontSize: '13px', fontWeight: 900, letterSpacing: '-0.5px', color: '#000000', marginLeft: '4px' }}>
+                  SHADOW MUSEUM ATLAS
+                </span>
+              </div>
 
-            <button
-              onClick={() => handleMetricToggle('raub')}
-              title="Klicken zum Isolieren des militärischen Raubnetzwerks"
-              style={{
-                backgroundColor: activeMetricFilter === 'raub' ? '#DC2626' : '#FFFFFF',
-                color: activeMetricFilter === 'raub' ? '#FFFFFF' : '#DC2626',
-                border: '2px solid #DC2626',
-                padding: '3px 7px',
-                fontSize: '9px',
-                fontWeight: 'bold',
-                cursor: 'pointer',
-                boxShadow: activeMetricFilter === 'raub' ? '2px 2px 0px #000000' : 'none'
-              }}
-            >
-              {stats.raub_kanten.toLocaleString()} RAUB-KANTEN
-            </button>
+              {/* View Mode Switcher */}
+              <div style={{ display: 'flex', border: '2px solid #000000', boxShadow: '2px 2px 0px #000000' }}>
+                <button
+                  onClick={() => setViewMode('graph')}
+                  style={{
+                    padding: '4px 9px',
+                    backgroundColor: viewMode === 'graph' ? '#000000' : '#FFFFFF',
+                    color: viewMode === 'graph' ? '#FFFFFF' : '#000000',
+                    border: 'none',
+                    borderRight: '1px solid #000000',
+                    fontSize: '9px',
+                    fontWeight: 900,
+                    cursor: 'pointer',
+                    letterSpacing: '0.5px'
+                  }}
+                >
+                  [GRAPH-NETZWERK]
+                </button>
+                <button
+                  onClick={() => setViewMode('map')}
+                  style={{
+                    padding: '4px 9px',
+                    backgroundColor: viewMode === 'map' ? '#DC2626' : '#FFFFFF',
+                    color: viewMode === 'map' ? '#FFFFFF' : '#DC2626',
+                    border: 'none',
+                    fontSize: '9px',
+                    fontWeight: 900,
+                    cursor: 'pointer',
+                    letterSpacing: '0.5px'
+                  }}
+                >
+                  [GEO-KARTE (RESTITUTION)]
+                </button>
+              </div>
+            </div>
 
-            <button
-              onClick={() => handleMetricToggle('schenkung')}
-              title="Klicken zum Isolieren der offiziellen Museums-Schenkungen"
-              style={{
-                backgroundColor: activeMetricFilter === 'schenkung' ? '#2563EB' : '#FFFFFF',
-                color: activeMetricFilter === 'schenkung' ? '#FFFFFF' : '#2563EB',
-                border: '2px solid #2563EB',
-                padding: '3px 7px',
-                fontSize: '9px',
-                fontWeight: 'bold',
-                cursor: 'pointer',
-                boxShadow: activeMetricFilter === 'schenkung' ? '2px 2px 0px #000000' : 'none'
-              }}
-            >
-              {stats.schenk_kanten.toLocaleString()} SCHENKUNGEN
-            </button>
+            {/* Right: Actions, Search, Auth */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+              {uploadMessage && (
+                <span style={{ padding: '3px 6px', backgroundColor: '#000000', color: '#FFFFFF', fontSize: '8px', fontWeight: 'bold' }}>
+                  {uploadMessage}
+                </span>
+              )}
+              {batchStatus && (
+                <span style={{ padding: '3px 6px', backgroundColor: '#B45309', color: '#FFFFFF', fontSize: '8px', fontWeight: 'bold' }}>
+                  {batchStatus}
+                </span>
+              )}
 
-            <button
-              onClick={() => handleMetricToggle('dissonanz')}
-              title="Klicken zum Isolieren der semantischen Dissonanzen (Multigraph-Kollision)"
-              style={{
-                backgroundColor: activeMetricFilter === 'dissonanz' ? '#CA8A04' : '#FFFFFF',
-                color: activeMetricFilter === 'dissonanz' ? '#FFFFFF' : '#854D0E',
-                border: '2px solid #CA8A04',
-                padding: '3px 7px',
-                fontSize: '9px',
-                fontWeight: 'bold',
-                cursor: 'pointer',
-                boxShadow: activeMetricFilter === 'dissonanz' ? '2px 2px 0px #000000' : 'none'
-              }}
-            >
-              {stats.contested_objekte.toLocaleString()} DISSONANZEN
-            </button>
+              {/* Search Bar */}
+              <div className="brutalist-border" style={{ padding: '3px 6px', display: 'flex', gap: '4px', width: '220px', backgroundColor: '#FFFFFF' }}>
+                <input
+                  type="text"
+                  placeholder="SUCHE (INV / AKTEUR / DEPOT)..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  style={{
+                    width: '100%',
+                    border: 'none',
+                    outline: 'none',
+                    fontSize: '9px',
+                    fontWeight: 'bold',
+                    backgroundColor: 'transparent',
+                    fontFamily: "'Space Mono', monospace"
+                  }}
+                />
+                {searchTerm && (
+                  <button
+                    onClick={() => setSearchTerm('')}
+                    style={{ border: 'none', background: 'none', cursor: 'pointer', fontWeight: 'bold', fontSize: '9px' }}
+                  >
+                    [X]
+                  </button>
+                )}
+              </div>
 
-            <button
-              onClick={() => handleMetricToggle('luecken')}
-              title="Klicken zum Isolieren der Provenienzlücken (Chain of Custody gerissen: LAGERT_IN ohne Akteur)"
-              style={{
-                backgroundColor: activeMetricFilter === 'luecken' ? '#7C3AED' : '#FFFFFF',
-                color: activeMetricFilter === 'luecken' ? '#FFFFFF' : '#7C3AED',
-                border: '2px solid #7C3AED',
-                padding: '3px 7px',
-                fontSize: '9px',
-                fontWeight: 'bold',
-                cursor: 'pointer',
-                boxShadow: activeMetricFilter === 'luecken' ? '2px 2px 0px #000000' : 'none'
-              }}
-            >
-              {(stats.provenienz_luecken || 83).toLocaleString()} PROVENIENZLÜCKEN
-            </button>
+              {/* Dual-Mode Auth Badge */}
+              {isResearcher ? (
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  border: '2px solid #16A34A',
+                  backgroundColor: '#F0FDF4',
+                  padding: '3px 7px',
+                  boxShadow: '2px 2px 0px #16A34A'
+                }}>
+                  <span style={{ fontSize: '9px', fontWeight: 900, color: '#16A34A', letterSpacing: '0.5px' }}>
+                    ● [MARIANNE // VOLLZUGRIFF]
+                  </span>
+                  <button
+                    onClick={handleLogout}
+                    title="Ausloggen und in Gast-Modus wechseln"
+                    style={{
+                      padding: '2px 5px',
+                      fontSize: '8px',
+                      fontWeight: 'bold',
+                      backgroundColor: '#000000',
+                      color: '#FFFFFF',
+                      border: 'none',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    LOGOUT
+                  </button>
+                </div>
+              ) : (
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  border: '2px solid #64748B',
+                  backgroundColor: '#F8FAFC',
+                  padding: '3px 7px',
+                  boxShadow: '2px 2px 0px #000000'
+                }}>
+                  <span style={{ fontSize: '9px', fontWeight: 900, color: '#475569', letterSpacing: '0.5px' }}>
+                    ○ [GAST // EXPLORER]
+                  </span>
+                  <button
+                    onClick={() => { setShowLoginModal(true); setLoginError(null); }}
+                    title="Forscher-Passwort für Vollzugriff eingeben"
+                    style={{
+                      padding: '2px 5px',
+                      fontSize: '8px',
+                      fontWeight: 'bold',
+                      backgroundColor: '#000000',
+                      color: '#FFFFFF',
+                      border: 'none',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    FORSCHER-LOGIN
+                  </button>
+                </div>
+              )}
 
-            <button
-              onClick={() => handleMetricToggle('verdacht')}
-              title="Klicken zum Isolieren der 36 probabilistischen Verdachtskanten (Autonomous Provenance Hunter)"
-              style={{
-                backgroundColor: activeMetricFilter === 'verdacht' ? '#0891B2' : '#FFFFFF',
-                color: activeMetricFilter === 'verdacht' ? '#FFFFFF' : '#0891B2',
-                border: '2px solid #0891B2',
-                padding: '3px 7px',
-                fontSize: '9px',
-                fontWeight: 'bold',
-                cursor: 'pointer',
-                boxShadow: activeMetricFilter === 'verdacht' ? '2px 2px 0px #000000' : 'none'
-              }}
-            >
-              {(stats.verdacht_kanten || suspicions.length || 36).toLocaleString()} VERDACHTS-KANTEN
-            </button>
-
-            <button
-              onClick={() => handleMetricToggle('akteure')}
-              title="Klicken zum Isolieren der Kolonialakteure / Offiziere"
-              style={{
-                backgroundColor: activeMetricFilter === 'akteure' ? '#B45309' : '#FFFFFF',
-                color: activeMetricFilter === 'akteure' ? '#FFFFFF' : '#B45309',
-                border: '2px solid #B45309',
-                padding: '3px 7px',
-                fontSize: '9px',
-                fontWeight: 'bold',
-                cursor: 'pointer',
-                boxShadow: activeMetricFilter === 'akteure' ? '2px 2px 0px #000000' : 'none'
-              }}
-            >
-              {stats.akteure} AKTEURE
-            </button>
-
-            <button
-              onClick={() => handleMetricToggle('depots')}
-              title="Klicken zum Isolieren der Museumsinstitutionen"
-              style={{
-                backgroundColor: activeMetricFilter === 'depots' ? '#000000' : '#FFFFFF',
-                color: activeMetricFilter === 'depots' ? '#FFFFFF' : '#000000',
-                border: '2px solid #000000',
-                padding: '3px 7px',
-                fontSize: '9px',
-                fontWeight: 'bold',
-                cursor: 'pointer',
-                boxShadow: activeMetricFilter === 'depots' ? '2px 2px 0px #000000' : 'none'
-              }}
-            >
-              {stats.institutionen} DEPOTS
-            </button>
-
-            {activeMetricFilter && (
+              {/* Action Buttons */}
               <button
-                onClick={() => setActiveMetricFilter(null)}
+                onClick={handleResetLayout}
                 style={{
+                  padding: '5px 7px',
                   backgroundColor: '#000000',
                   color: '#FFFFFF',
-                  border: '1px solid #000000',
-                  padding: '3px 6px',
-                  fontSize: '8px',
+                  border: '2px solid #000000',
+                  boxShadow: '2px 2px 0px #DC2626',
+                  fontSize: '9px',
                   fontWeight: 'bold',
                   cursor: 'pointer'
                 }}
               >
-                [RESET FILTER]
+                [LAYOUT RESETTEN]
               </button>
-            )}
-          </div>
 
-          {/* Zuschaltbare Quellen */}
-          <div style={{ display: 'flex', gap: '5px', alignItems: 'center', flexWrap: 'wrap' }}>
-            <span style={{ fontSize: '8px', fontWeight: 900, color: '#000000' }}>QUELLEN:</span>
-            {publications.map((pub: any) => {
-              const isActive = selectedPubs.has(pub.id);
-              return (
-                <div key={pub.id} style={{ display: 'inline-flex', border: '1px solid #000000' }}>
-                  <button
-                    onClick={() => togglePublication(pub.id)}
-                    title={`${pub.name} (${pub.typ}, ${pub.jahr || ''})`}
-                    style={{
-                      padding: '2px 5px',
-                      fontSize: '8px',
-                      fontWeight: 'bold',
-                      cursor: 'pointer',
-                      backgroundColor: isActive ? '#000000' : '#FFFFFF',
-                      color: isActive ? '#FFFFFF' : '#64748B',
-                      border: 'none',
-                      borderRight: '1px solid #000000',
-                      textDecoration: isActive ? 'none' : 'line-through'
-                    }}
-                  >
-                    [{isActive ? 'X' : ' '}] {pub.kuerzel} ({pub.edge_count})
-                  </button>
-                  <button
-                    onClick={() => handleDeletePublication(pub.id)}
-                    title="Publikation restlos löschen"
-                    style={{
-                      padding: '2px 5px',
-                      fontSize: '8px',
-                      fontWeight: 'bold',
-                      cursor: 'pointer',
-                      backgroundColor: '#DC2626',
-                      color: '#FFFFFF',
-                      border: 'none'
-                    }}
-                  >
-                    x
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Rechte Header-Sektion: Aktionen & Suche */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', alignItems: 'flex-end' }}>
-          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-            
-            {/* Dual-Mode Auth Status Badge */}
-            {isResearcher ? (
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '5px',
-                border: '2px solid #16A34A',
-                backgroundColor: '#F0FDF4',
-                padding: '4px 8px',
-                boxShadow: '2px 2px 0px #16A34A',
-                marginRight: '4px'
-              }}>
-                <span style={{ fontSize: '9px', fontWeight: 900, color: '#16A34A', letterSpacing: '0.5px' }}>
-                  ● [MARIANNE // VOLLZUGRIFF]
-                </span>
-                <button
-                  onClick={handleLogout}
-                  title="Ausloggen und in Gast-Modus wechseln"
-                  style={{
-                    padding: '2px 5px',
-                    fontSize: '8px',
-                    fontWeight: 'bold',
-                    backgroundColor: '#000000',
-                    color: '#FFFFFF',
-                    border: 'none',
-                    cursor: 'pointer'
-                  }}
-                >
-                  LOGOUT
-                </button>
-              </div>
-            ) : (
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '5px',
-                border: '2px solid #64748B',
-                backgroundColor: '#F8FAFC',
-                padding: '4px 8px',
-                boxShadow: '2px 2px 0px #000000',
-                marginRight: '4px'
-              }}>
-                <span style={{ fontSize: '9px', fontWeight: 900, color: '#475569', letterSpacing: '0.5px' }}>
-                  ○ [GAST // EXPLORER]
-                </span>
-                <button
-                  onClick={() => { setShowLoginModal(true); setLoginError(null); }}
-                  title="Forscher-Passwort für Vollzugriff eingeben"
-                  style={{
-                    padding: '2px 5px',
-                    fontSize: '8px',
-                    fontWeight: 'bold',
-                    backgroundColor: '#000000',
-                    color: '#FFFFFF',
-                    border: 'none',
-                    cursor: 'pointer'
-                  }}
-                >
-                  FORSCHER-LOGIN
-                </button>
-              </div>
-            )}
-
-            <button
-              onClick={handleResetLayout}
-              style={{
-                padding: '6px 8px',
-                backgroundColor: '#000000',
-                color: '#FFFFFF',
-                border: '2px solid #000000',
-                boxShadow: '2px 2px 0px #DC2626',
-                fontSize: '9px',
-                fontWeight: 'bold',
-                cursor: 'pointer',
-                marginRight: '6px'
-              }}
-            >
-              [LAYOUT RESETTEN]
-            </button>
-
-            {/* View Mode Switcher: Graph vs Geo-Karte */}
-            <div style={{ display: 'flex', border: '2px solid #000000', boxShadow: '2px 2px 0px #000000', marginRight: '4px' }}>
               <button
-                onClick={() => setViewMode('graph')}
+                onClick={() => {
+                  const next = !kioskMode;
+                  setKioskMode(next);
+                  if (next) {
+                    setActiveMetricFilter(null);
+                    setGhostMode(false);
+                  }
+                }}
+                title="Museums-Installationsmodus: Automatischer Kameraflug über Raubkunst- und Dissonanzknoten"
                 style={{
-                  padding: '6px 10px',
-                  backgroundColor: viewMode === 'graph' ? '#000000' : '#FFFFFF',
-                  color: viewMode === 'graph' ? '#FFFFFF' : '#000000',
-                  border: 'none',
-                  borderRight: '1px solid #000000',
-                  fontSize: '9px',
+                  padding: '5px 8px',
+                  backgroundColor: kioskMode ? '#000000' : '#FFFFFF',
+                  color: kioskMode ? '#F59E0B' : '#000000',
+                  border: kioskMode ? '2px solid #F59E0B' : '2px solid #000000',
+                  boxShadow: kioskMode ? '2px 2px 0px #F59E0B' : '2px 2px 0px #000000',
                   fontWeight: 900,
+                  fontSize: '9px',
                   cursor: 'pointer',
                   letterSpacing: '0.5px'
                 }}
               >
-                [GRAPH-NETZWERK]
+                {kioskMode ? '[KIOSK-AUTOPILOT: AKTIV]' : '[KIOSK-MODUS (AUTOPILOT)]'}
               </button>
+
               <button
-                onClick={() => setViewMode('map')}
+                onClick={() => {
+                  setGhostMode(!ghostMode);
+                  if (!ghostMode) setActiveMetricFilter(null);
+                  if (fgRef.current) fgRef.current.zoomToFit(800, 50);
+                }}
                 style={{
-                  padding: '6px 10px',
-                  backgroundColor: viewMode === 'map' ? '#DC2626' : '#FFFFFF',
-                  color: viewMode === 'map' ? '#FFFFFF' : '#DC2626',
-                  border: 'none',
+                  padding: '5px 8px',
+                  backgroundColor: ghostMode ? '#DC2626' : '#FFFFFF',
+                  color: ghostMode ? '#FFFFFF' : '#000000',
+                  border: '2px solid #000000',
+                  boxShadow: '2px 2px 0px #000000',
+                  fontWeight: 'bold',
                   fontSize: '9px',
-                  fontWeight: 900,
-                  cursor: 'pointer',
-                  letterSpacing: '0.5px'
+                  cursor: 'pointer'
                 }}
               >
-                [GEO-KARTE (RESTITUTION)]
+                {ghostMode ? '[GHOST-MODUS AKTIV]' : '[GHOST-NODES (VERSCHOLLEN)]'}
               </button>
-            </div>
 
-            <button
-              onClick={() => {
-                const next = !kioskMode;
-                setKioskMode(next);
-                if (next) {
-                  setActiveMetricFilter(null);
-                  setGhostMode(false);
-                }
-              }}
-              title="Museums-Installationsmodus: Automatischer Kameraflug über Raubkunst- und Dissonanzknoten"
-              style={{
-                padding: '6px 10px',
-                backgroundColor: kioskMode ? '#000000' : '#FFFFFF',
-                color: kioskMode ? '#F59E0B' : '#000000',
-                border: kioskMode ? '2px solid #F59E0B' : '2px solid #000000',
-                boxShadow: kioskMode ? '2px 2px 0px #F59E0B' : '2px 2px 0px #000000',
-                fontWeight: 900,
-                fontSize: '9px',
-                cursor: 'pointer',
-                letterSpacing: '0.5px'
-              }}
-            >
-              {kioskMode ? '[KIOSK-AUTOPILOT: AKTIV]' : '[KIOSK-MODUS (AUTOPILOT)]'}
-            </button>
-
-            <button
-              onClick={() => {
-                setGhostMode(!ghostMode);
-                if (!ghostMode) setActiveMetricFilter(null);
-                if (fgRef.current) fgRef.current.zoomToFit(800, 50);
-              }}
-              style={{
-                padding: '6px 10px',
-                backgroundColor: ghostMode ? '#DC2626' : '#FFFFFF',
-                color: ghostMode ? '#FFFFFF' : '#000000',
-                border: '2px solid #000000',
-                boxShadow: '2px 2px 0px #000000',
-                fontWeight: 'bold',
-                fontSize: '9px',
-                cursor: 'pointer'
-              }}
-            >
-              {ghostMode ? '[GHOST-MODUS AKTIV]' : '[GHOST-NODES (VERSCHOLLEN)]'}
-            </button>
-
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".pdf,.xlsx,.xls,.txt,.csv"
-              onChange={handleFileUpload}
-              style={{ display: 'none' }}
-            />
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={isUploading}
-              style={{
-                padding: '6px 10px',
-                backgroundColor: '#F8FAFC',
-                color: '#000000',
-                border: '2px dashed #000000',
-                boxShadow: '2px 2px 0px #000000',
-                fontWeight: 'bold',
-                fontSize: '9px',
-                cursor: isUploading ? 'wait' : 'pointer'
-              }}
-            >
-              {isUploading ? '[INGESTION LAEUFT...]' : '[+ QUELLE INJIZIEREN]'}
-            </button>
-
-            <button
-              onClick={() => fgRef.current?.zoomToFit(600, 40)}
-              style={{
-                padding: '6px 8px',
-                backgroundColor: '#FFFFFF',
-                border: '2px solid #000000',
-                boxShadow: '2px 2px 0px #000000',
-                fontSize: '9px',
-                fontWeight: 'bold',
-                cursor: 'pointer'
-              }}
-            >
-              [ZOOM TO FIT]
-            </button>
-          </div>
-
-          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-            {uploadMessage && (
-              <span style={{ padding: '3px 6px', backgroundColor: '#000000', color: '#FFFFFF', fontSize: '8px', fontWeight: 'bold' }}>
-                {uploadMessage}
-              </span>
-            )}
-            {batchStatus && (
-              <span style={{ padding: '3px 6px', backgroundColor: '#B45309', color: '#FFFFFF', fontSize: '8px', fontWeight: 'bold' }}>
-                {batchStatus}
-              </span>
-            )}
-            <div className="brutalist-border" style={{ padding: '3px 6px', display: 'flex', gap: '4px', width: '250px', backgroundColor: '#FFFFFF' }}>
-              <input
-                type="text"
-                placeholder="SUCHE (INV / AKTEUR / DEPOT)..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isUploading}
                 style={{
-                  width: '100%',
-                  border: 'none',
-                  outline: 'none',
+                  padding: '5px 8px',
+                  backgroundColor: '#F8FAFC',
+                  color: '#000000',
+                  border: '2px dashed #000000',
+                  boxShadow: '2px 2px 0px #000000',
+                  fontWeight: 'bold',
+                  fontSize: '9px',
+                  cursor: isUploading ? 'wait' : 'pointer'
+                }}
+              >
+                {isUploading ? '[INGESTION LAEUFT...]' : '[+ QUELLE INJIZIEREN]'}
+              </button>
+
+              <button
+                onClick={() => fgRef.current?.zoomToFit(600, 40)}
+                style={{
+                  padding: '5px 7px',
+                  backgroundColor: '#FFFFFF',
+                  border: '2px solid #000000',
+                  boxShadow: '2px 2px 0px #000000',
                   fontSize: '9px',
                   fontWeight: 'bold',
-                  backgroundColor: 'transparent',
-                  fontFamily: "'Space Mono', monospace"
+                  cursor: 'pointer'
                 }}
-              />
-              {searchTerm && (
+              >
+                [ZOOM TO FIT]
+              </button>
+            </div>
+          </div>
+
+          {/* TIER 2: METRICS & SOURCES */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 18px', gap: '12px', flexWrap: 'wrap', backgroundColor: '#FAFAFA' }}>
+            {/* Metrik-Schalter */}
+            <div style={{ display: 'flex', gap: '5px', alignItems: 'center', flexWrap: 'wrap' }}>
+              <button
+                onClick={() => handleMetricToggle('subjekte')}
+                title="Klicken zum Isolieren aller Subjekte / Kulturgüter"
+                style={{
+                  backgroundColor: activeMetricFilter === 'subjekte' ? '#000000' : '#F1F5F9',
+                  color: activeMetricFilter === 'subjekte' ? '#FFFFFF' : '#000000',
+                  border: '2px solid #000000',
+                  padding: '3px 7px',
+                  fontSize: '9px',
+                  fontWeight: 'bold',
+                  cursor: 'pointer',
+                  boxShadow: activeMetricFilter === 'subjekte' ? '2px 2px 0px #000000' : 'none'
+                }}
+              >
+                {stats.subjekte.toLocaleString()} SUBJEKTE
+              </button>
+
+              <button
+                onClick={() => handleMetricToggle('raub')}
+                title="Klicken zum Isolieren des militärischen Raubnetzwerks"
+                style={{
+                  backgroundColor: activeMetricFilter === 'raub' ? '#DC2626' : '#FFFFFF',
+                  color: activeMetricFilter === 'raub' ? '#FFFFFF' : '#DC2626',
+                  border: '2px solid #DC2626',
+                  padding: '3px 7px',
+                  fontSize: '9px',
+                  fontWeight: 'bold',
+                  cursor: 'pointer',
+                  boxShadow: activeMetricFilter === 'raub' ? '2px 2px 0px #000000' : 'none'
+                }}
+              >
+                {stats.raub_kanten.toLocaleString()} RAUB-KANTEN
+              </button>
+
+              <button
+                onClick={() => handleMetricToggle('schenkung')}
+                title="Klicken zum Isolieren der offiziellen Museums-Schenkungen"
+                style={{
+                  backgroundColor: activeMetricFilter === 'schenkung' ? '#2563EB' : '#FFFFFF',
+                  color: activeMetricFilter === 'schenkung' ? '#FFFFFF' : '#2563EB',
+                  border: '2px solid #2563EB',
+                  padding: '3px 7px',
+                  fontSize: '9px',
+                  fontWeight: 'bold',
+                  cursor: 'pointer',
+                  boxShadow: activeMetricFilter === 'schenkung' ? '2px 2px 0px #000000' : 'none'
+                }}
+              >
+                {stats.schenk_kanten.toLocaleString()} SCHENKUNGEN
+              </button>
+
+              <button
+                onClick={() => handleMetricToggle('dissonanz')}
+                title="Klicken zum Isolieren der semantischen Dissonanzen (Multigraph-Kollision)"
+                style={{
+                  backgroundColor: activeMetricFilter === 'dissonanz' ? '#CA8A04' : '#FFFFFF',
+                  color: activeMetricFilter === 'dissonanz' ? '#FFFFFF' : '#854D0E',
+                  border: '2px solid #CA8A04',
+                  padding: '3px 7px',
+                  fontSize: '9px',
+                  fontWeight: 'bold',
+                  cursor: 'pointer',
+                  boxShadow: activeMetricFilter === 'dissonanz' ? '2px 2px 0px #000000' : 'none'
+                }}
+              >
+                {stats.contested_objekte.toLocaleString()} DISSONANZEN
+              </button>
+
+              <button
+                onClick={() => handleMetricToggle('luecken')}
+                title="Klicken zum Isolieren der Provenienzlücken (Chain of Custody gerissen: LAGERT_IN ohne Akteur)"
+                style={{
+                  backgroundColor: activeMetricFilter === 'luecken' ? '#7C3AED' : '#FFFFFF',
+                  color: activeMetricFilter === 'luecken' ? '#FFFFFF' : '#7C3AED',
+                  border: '2px solid #7C3AED',
+                  padding: '3px 7px',
+                  fontSize: '9px',
+                  fontWeight: 'bold',
+                  cursor: 'pointer',
+                  boxShadow: activeMetricFilter === 'luecken' ? '2px 2px 0px #000000' : 'none'
+                }}
+              >
+                {(stats.provenienz_luecken || 83).toLocaleString()} PROVENIENZLÜCKEN
+              </button>
+
+              <button
+                onClick={() => handleMetricToggle('verdacht')}
+                title="Klicken zum Isolieren der 36 probabilistischen Verdachtskanten (Autonomous Provenance Hunter)"
+                style={{
+                  backgroundColor: activeMetricFilter === 'verdacht' ? '#0891B2' : '#FFFFFF',
+                  color: activeMetricFilter === 'verdacht' ? '#FFFFFF' : '#0891B2',
+                  border: '2px solid #0891B2',
+                  padding: '3px 7px',
+                  fontSize: '9px',
+                  fontWeight: 'bold',
+                  cursor: 'pointer',
+                  boxShadow: activeMetricFilter === 'verdacht' ? '2px 2px 0px #000000' : 'none'
+                }}
+              >
+                {(stats.verdacht_kanten || suspicions.length || 36).toLocaleString()} VERDACHTS-KANTEN
+              </button>
+
+              <button
+                onClick={() => handleMetricToggle('akteure')}
+                title="Klicken zum Isolieren der Kolonialakteure / Offiziere"
+                style={{
+                  backgroundColor: activeMetricFilter === 'akteure' ? '#B45309' : '#FFFFFF',
+                  color: activeMetricFilter === 'akteure' ? '#FFFFFF' : '#B45309',
+                  border: '2px solid #B45309',
+                  padding: '3px 7px',
+                  fontSize: '9px',
+                  fontWeight: 'bold',
+                  cursor: 'pointer',
+                  boxShadow: activeMetricFilter === 'akteure' ? '2px 2px 0px #000000' : 'none'
+                }}
+              >
+                {stats.akteure} AKTEURE
+              </button>
+
+              <button
+                onClick={() => handleMetricToggle('depots')}
+                title="Klicken zum Isolieren der Museumsinstitutionen"
+                style={{
+                  backgroundColor: activeMetricFilter === 'depots' ? '#000000' : '#FFFFFF',
+                  color: activeMetricFilter === 'depots' ? '#FFFFFF' : '#000000',
+                  border: '2px solid #000000',
+                  padding: '3px 7px',
+                  fontSize: '9px',
+                  fontWeight: 'bold',
+                  cursor: 'pointer',
+                  boxShadow: activeMetricFilter === 'depots' ? '2px 2px 0px #000000' : 'none'
+                }}
+              >
+                {stats.institutionen} DEPOTS
+              </button>
+
+              {activeMetricFilter && (
                 <button
-                  onClick={() => setSearchTerm('')}
-                  style={{ border: 'none', background: 'none', cursor: 'pointer', fontWeight: 'bold', fontSize: '9px' }}
+                  onClick={() => setActiveMetricFilter(null)}
+                  style={{
+                    backgroundColor: '#000000',
+                    color: '#FFFFFF',
+                    border: '1px solid #000000',
+                    padding: '3px 6px',
+                    fontSize: '8px',
+                    fontWeight: 'bold',
+                    cursor: 'pointer'
+                  }}
                 >
-                  [X]
+                  [RESET FILTER]
                 </button>
               )}
             </div>
+
+            {/* Zuschaltbare Quellen */}
+            <div style={{ display: 'flex', gap: '5px', alignItems: 'center', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '8px', fontWeight: 900, color: '#000000' }}>QUELLEN:</span>
+              {publications.map((pub: any) => {
+                const isActive = selectedPubs.has(pub.id);
+                return (
+                  <div key={pub.id} style={{ display: 'inline-flex', border: '1px solid #000000' }}>
+                    <button
+                      onClick={() => togglePublication(pub.id)}
+                      title={`${pub.name} (${pub.typ}, ${pub.jahr || ''})`}
+                      style={{
+                        padding: '2px 5px',
+                        fontSize: '8px',
+                        fontWeight: 'bold',
+                        cursor: 'pointer',
+                        backgroundColor: isActive ? '#000000' : '#FFFFFF',
+                        color: isActive ? '#FFFFFF' : '#64748B',
+                        border: 'none',
+                        borderRight: '1px solid #000000',
+                        textDecoration: isActive ? 'none' : 'line-through'
+                      }}
+                    >
+                      [{isActive ? 'X' : ' '}] {pub.kuerzel} ({pub.edge_count})
+                    </button>
+                    <button
+                      onClick={() => handleDeletePublication(pub.id)}
+                      title="Publikation restlos löschen"
+                      style={{
+                        padding: '2px 5px',
+                        fontSize: '8px',
+                        fontWeight: 'bold',
+                        cursor: 'pointer',
+                        backgroundColor: '#DC2626',
+                        color: '#FFFFFF',
+                        border: 'none'
+                      }}
+                    >
+                      x
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
           </div>
+        </div>
+
+        {/* ========================================================= */}
+        {/* MOBILE HEADER (COMPACT TOP BAR + EXPANDABLE DRAWER)       */}
+        {/* ========================================================= */}
+        <div className="mobile-header">
+          {/* Top Bar (Height ~48px) */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', backgroundColor: '#FFFFFF', borderBottom: mobileMenuOpen ? '2px solid #000000' : 'none' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ backgroundColor: '#000000', color: '#FFFFFF', padding: '2px 6px', fontWeight: 'bold', fontSize: '9px', letterSpacing: '1px' }}>
+                ECHO
+              </span>
+              <span style={{ fontSize: '11px', fontWeight: 900, color: '#000000', letterSpacing: '-0.3px' }}>
+                SHADOW ATLAS
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <div style={{ display: 'flex', border: '1.5px solid #000000' }}>
+                <button
+                  onClick={() => setViewMode('graph')}
+                  style={{
+                    padding: '3px 7px',
+                    backgroundColor: viewMode === 'graph' ? '#000000' : '#FFFFFF',
+                    color: viewMode === 'graph' ? '#FFFFFF' : '#000000',
+                    border: 'none',
+                    borderRight: '1px solid #000000',
+                    fontSize: '8px',
+                    fontWeight: 900,
+                    cursor: 'pointer'
+                  }}
+                >
+                  GRAPH
+                </button>
+                <button
+                  onClick={() => setViewMode('map')}
+                  style={{
+                    padding: '3px 7px',
+                    backgroundColor: viewMode === 'map' ? '#DC2626' : '#FFFFFF',
+                    color: viewMode === 'map' ? '#FFFFFF' : '#DC2626',
+                    border: 'none',
+                    fontSize: '8px',
+                    fontWeight: 900,
+                    cursor: 'pointer'
+                  }}
+                >
+                  MAP
+                </button>
+              </div>
+
+              <button
+                onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+                style={{
+                  padding: '4px 8px',
+                  fontSize: '9px',
+                  fontWeight: 900,
+                  border: '2px solid #000000',
+                  backgroundColor: mobileMenuOpen ? '#000000' : '#FFFFFF',
+                  color: mobileMenuOpen ? '#FFFFFF' : '#000000',
+                  cursor: 'pointer',
+                  boxShadow: '1px 1px 0px #000000'
+                }}
+              >
+                {mobileMenuOpen ? '[✕ SCHLIESSEN]' : '[☰ MENÜ / FILTER]'}
+              </button>
+            </div>
+          </div>
+
+          {/* Expandable Mobile Drawer */}
+          {mobileMenuOpen && (
+            <div style={{ padding: '10px 12px', backgroundColor: '#F8FAFC', borderTop: '2px solid #000000', display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '70vh', overflowY: 'auto', boxSizing: 'border-box' }}>
+              {/* Search */}
+              <div className="brutalist-border" style={{ padding: '4px 8px', display: 'flex', gap: '4px', width: '100%', boxSizing: 'border-box', backgroundColor: '#FFFFFF' }}>
+                <input
+                  type="text"
+                  placeholder="SUCHE (INV / AKTEUR / DEPOT)..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  style={{
+                    width: '100%',
+                    border: 'none',
+                    outline: 'none',
+                    fontSize: '10px',
+                    fontWeight: 'bold',
+                    backgroundColor: 'transparent',
+                    fontFamily: "'Space Mono', monospace"
+                  }}
+                />
+                {searchTerm && (
+                  <button
+                    onClick={() => setSearchTerm('')}
+                    style={{ border: 'none', background: 'none', cursor: 'pointer', fontWeight: 'bold', fontSize: '10px' }}
+                  >
+                    [X]
+                  </button>
+                )}
+              </div>
+
+              {/* Dual-Mode Auth & Actions */}
+              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
+                {isResearcher ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', border: '1.5px solid #16A34A', backgroundColor: '#F0FDF4', padding: '3px 6px' }}>
+                    <span style={{ fontSize: '8px', fontWeight: 900, color: '#16A34A' }}>● MARIANNE</span>
+                    <button onClick={handleLogout} style={{ padding: '2px 5px', fontSize: '8px', fontWeight: 'bold', backgroundColor: '#000000', color: '#FFFFFF', border: 'none', cursor: 'pointer' }}>LOGOUT</button>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', border: '1.5px solid #64748B', backgroundColor: '#FFFFFF', padding: '3px 6px' }}>
+                    <span style={{ fontSize: '8px', fontWeight: 900, color: '#475569' }}>○ GAST</span>
+                    <button onClick={() => { setShowLoginModal(true); setLoginError(null); setMobileMenuOpen(false); }} style={{ padding: '2px 5px', fontSize: '8px', fontWeight: 'bold', backgroundColor: '#000000', color: '#FFFFFF', border: 'none', cursor: 'pointer' }}>LOGIN</button>
+                  </div>
+                )}
+                <div style={{ display: 'flex', gap: '4px' }}>
+                  <button onClick={() => { handleResetLayout(); setMobileMenuOpen(false); }} style={{ padding: '4px 6px', backgroundColor: '#000000', color: '#FFFFFF', border: '1.5px solid #000000', fontSize: '8px', fontWeight: 'bold', cursor: 'pointer' }}>[RESET]</button>
+                  <button onClick={() => { fgRef.current?.zoomToFit(600, 40); setMobileMenuOpen(false); }} style={{ padding: '4px 6px', backgroundColor: '#FFFFFF', border: '1.5px solid #000000', fontSize: '8px', fontWeight: 'bold', cursor: 'pointer' }}>[ZOOM]</button>
+                </div>
+              </div>
+
+              {/* Mode Toggles */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+                <button
+                  onClick={() => {
+                    const next = !kioskMode;
+                    setKioskMode(next);
+                    if (next) {
+                      setActiveMetricFilter(null);
+                      setGhostMode(false);
+                    }
+                    setMobileMenuOpen(false);
+                  }}
+                  style={{
+                    padding: '6px 8px',
+                    backgroundColor: kioskMode ? '#000000' : '#FFFFFF',
+                    color: kioskMode ? '#F59E0B' : '#000000',
+                    border: kioskMode ? '2px solid #F59E0B' : '1.5px solid #000000',
+                    fontWeight: 900,
+                    fontSize: '9px',
+                    cursor: 'pointer',
+                    textAlign: 'center'
+                  }}
+                >
+                  {kioskMode ? '● KIOSK: AKTIV' : '○ KIOSK-MODUS'}
+                </button>
+                <button
+                  onClick={() => {
+                    setGhostMode(!ghostMode);
+                    if (!ghostMode) setActiveMetricFilter(null);
+                    if (fgRef.current) fgRef.current.zoomToFit(800, 50);
+                    setMobileMenuOpen(false);
+                  }}
+                  style={{
+                    padding: '6px 8px',
+                    backgroundColor: ghostMode ? '#DC2626' : '#FFFFFF',
+                    color: ghostMode ? '#FFFFFF' : '#000000',
+                    border: '1.5px solid #000000',
+                    fontWeight: 'bold',
+                    fontSize: '9px',
+                    cursor: 'pointer',
+                    textAlign: 'center'
+                  }}
+                >
+                  {ghostMode ? '● GHOST AKTIV' : '○ GHOST NODES'}
+                </button>
+              </div>
+
+              {/* File Ingestion */}
+              <button
+                onClick={() => {
+                  fileInputRef.current?.click();
+                  setMobileMenuOpen(false);
+                }}
+                disabled={isUploading}
+                style={{
+                  padding: '6px 8px',
+                  backgroundColor: '#FFFFFF',
+                  color: '#000000',
+                  border: '1.5px dashed #000000',
+                  fontWeight: 'bold',
+                  fontSize: '9px',
+                  cursor: isUploading ? 'wait' : 'pointer',
+                  textAlign: 'center'
+                }}
+              >
+                {isUploading ? '[INGESTION LAEUFT...]' : '[+ QUELLE INJIZIEREN]'}
+              </button>
+
+              {/* Metric Filters */}
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                  <span style={{ fontSize: '9px', fontWeight: 900, color: '#475569', letterSpacing: '0.5px' }}>
+                    METRIK-FILTER (ISOLIEREN):
+                  </span>
+                  {activeMetricFilter && (
+                    <button
+                      onClick={() => setActiveMetricFilter(null)}
+                      style={{
+                        backgroundColor: '#000000',
+                        color: '#FFFFFF',
+                        border: 'none',
+                        padding: '2px 5px',
+                        fontSize: '8px',
+                        fontWeight: 'bold',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      [RESET]
+                    </button>
+                  )}
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '5px' }}>
+                  <button
+                    onClick={() => { handleMetricToggle('subjekte'); setMobileMenuOpen(false); }}
+                    style={{
+                      backgroundColor: activeMetricFilter === 'subjekte' ? '#000000' : '#FFFFFF',
+                      color: activeMetricFilter === 'subjekte' ? '#FFFFFF' : '#000000',
+                      border: '1.5px solid #000000',
+                      padding: '4px 6px',
+                      fontSize: '8px',
+                      fontWeight: 'bold',
+                      cursor: 'pointer',
+                      textAlign: 'left'
+                    }}
+                  >
+                    {stats.subjekte.toLocaleString()} SUBJEKTE
+                  </button>
+
+                  <button
+                    onClick={() => { handleMetricToggle('raub'); setMobileMenuOpen(false); }}
+                    style={{
+                      backgroundColor: activeMetricFilter === 'raub' ? '#DC2626' : '#FFFFFF',
+                      color: activeMetricFilter === 'raub' ? '#FFFFFF' : '#DC2626',
+                      border: '1.5px solid #DC2626',
+                      padding: '4px 6px',
+                      fontSize: '8px',
+                      fontWeight: 'bold',
+                      cursor: 'pointer',
+                      textAlign: 'left'
+                    }}
+                  >
+                    {stats.raub_kanten.toLocaleString()} RAUB
+                  </button>
+
+                  <button
+                    onClick={() => { handleMetricToggle('schenkung'); setMobileMenuOpen(false); }}
+                    style={{
+                      backgroundColor: activeMetricFilter === 'schenkung' ? '#2563EB' : '#FFFFFF',
+                      color: activeMetricFilter === 'schenkung' ? '#FFFFFF' : '#2563EB',
+                      border: '1.5px solid #2563EB',
+                      padding: '4px 6px',
+                      fontSize: '8px',
+                      fontWeight: 'bold',
+                      cursor: 'pointer',
+                      textAlign: 'left'
+                    }}
+                  >
+                    {stats.schenk_kanten.toLocaleString()} SCHENKUNG
+                  </button>
+
+                  <button
+                    onClick={() => { handleMetricToggle('dissonanz'); setMobileMenuOpen(false); }}
+                    style={{
+                      backgroundColor: activeMetricFilter === 'dissonanz' ? '#CA8A04' : '#FFFFFF',
+                      color: activeMetricFilter === 'dissonanz' ? '#FFFFFF' : '#854D0E',
+                      border: '1.5px solid #CA8A04',
+                      padding: '4px 6px',
+                      fontSize: '8px',
+                      fontWeight: 'bold',
+                      cursor: 'pointer',
+                      textAlign: 'left'
+                    }}
+                  >
+                    {stats.contested_objekte.toLocaleString()} DISSONANZ
+                  </button>
+
+                  <button
+                    onClick={() => { handleMetricToggle('luecken'); setMobileMenuOpen(false); }}
+                    style={{
+                      backgroundColor: activeMetricFilter === 'luecken' ? '#7C3AED' : '#FFFFFF',
+                      color: activeMetricFilter === 'luecken' ? '#FFFFFF' : '#7C3AED',
+                      border: '1.5px solid #7C3AED',
+                      padding: '4px 6px',
+                      fontSize: '8px',
+                      fontWeight: 'bold',
+                      cursor: 'pointer',
+                      textAlign: 'left'
+                    }}
+                  >
+                    {(stats.provenienz_luecken || 83).toLocaleString()} LÜCKEN
+                  </button>
+
+                  <button
+                    onClick={() => { handleMetricToggle('verdacht'); setMobileMenuOpen(false); }}
+                    style={{
+                      backgroundColor: activeMetricFilter === 'verdacht' ? '#0891B2' : '#FFFFFF',
+                      color: activeMetricFilter === 'verdacht' ? '#FFFFFF' : '#0891B2',
+                      border: '1.5px solid #0891B2',
+                      padding: '4px 6px',
+                      fontSize: '8px',
+                      fontWeight: 'bold',
+                      cursor: 'pointer',
+                      textAlign: 'left'
+                    }}
+                  >
+                    {(stats.verdacht_kanten || suspicions.length || 36).toLocaleString()} VERDACHT
+                  </button>
+
+                  <button
+                    onClick={() => { handleMetricToggle('akteure'); setMobileMenuOpen(false); }}
+                    style={{
+                      backgroundColor: activeMetricFilter === 'akteure' ? '#B45309' : '#FFFFFF',
+                      color: activeMetricFilter === 'akteure' ? '#FFFFFF' : '#B45309',
+                      border: '1.5px solid #B45309',
+                      padding: '4px 6px',
+                      fontSize: '8px',
+                      fontWeight: 'bold',
+                      cursor: 'pointer',
+                      textAlign: 'left'
+                    }}
+                  >
+                    {stats.akteure} AKTEURE
+                  </button>
+
+                  <button
+                    onClick={() => { handleMetricToggle('depots'); setMobileMenuOpen(false); }}
+                    style={{
+                      backgroundColor: activeMetricFilter === 'depots' ? '#000000' : '#FFFFFF',
+                      color: activeMetricFilter === 'depots' ? '#FFFFFF' : '#000000',
+                      border: '1.5px solid #000000',
+                      padding: '4px 6px',
+                      fontSize: '8px',
+                      fontWeight: 'bold',
+                      cursor: 'pointer',
+                      textAlign: 'left'
+                    }}
+                  >
+                    {stats.institutionen} DEPOTS
+                  </button>
+                </div>
+              </div>
+
+              {/* Quellen */}
+              <div>
+                <span style={{ fontSize: '9px', fontWeight: 900, color: '#475569', letterSpacing: '0.5px' }}>
+                  QUELLEN:
+                </span>
+                <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', marginTop: '4px' }}>
+                  {publications.map((pub: any) => {
+                    const isActive = selectedPubs.has(pub.id);
+                    return (
+                      <div key={pub.id} style={{ display: 'inline-flex', border: '1px solid #000000' }}>
+                        <button
+                          onClick={() => togglePublication(pub.id)}
+                          style={{
+                            padding: '2px 4px',
+                            fontSize: '8px',
+                            fontWeight: 'bold',
+                            cursor: 'pointer',
+                            backgroundColor: isActive ? '#000000' : '#FFFFFF',
+                            color: isActive ? '#FFFFFF' : '#64748B',
+                            border: 'none',
+                            textDecoration: isActive ? 'none' : 'line-through'
+                          }}
+                        >
+                          [{isActive ? 'X' : ' '}] {pub.kuerzel}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </header>
 
@@ -1871,7 +2252,6 @@ export default function App() {
           className="left-sidebar"
           style={{
             width: sidebarOpen ? '320px' : '44px',
-            className: 'left-sidebar',
             height: '100%',
             borderRight: '3px solid #000000',
             backgroundColor: '#FFFFFF',
@@ -2255,6 +2635,7 @@ export default function App() {
         {/* COLUMN 2: CENTER CANVAS CONTAINER (RESIZES DYNAMICALLY VIA RESIZEOBSERVER) */}
         <main
           ref={canvasContainerRef}
+          className="main-canvas"
           style={{
             flex: 1,
             height: '100%',
@@ -2368,7 +2749,7 @@ export default function App() {
 
           {/* Floating Legende (Unten Links im Canvas) */}
           {viewMode === 'graph' && (
-          <div style={{ position: 'absolute', bottom: 16, left: 16, padding: '8px 12px', backgroundColor: 'rgba(255, 255, 255, 0.95)', border: '2px solid #000000', boxShadow: '3px 3px 0px #000000', display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', zIndex: 20 }}>
+          <div className="ui-overlay" style={{ position: 'absolute', bottom: 16, left: 16, padding: '8px 12px', backgroundColor: 'rgba(255, 255, 255, 0.95)', border: '2px solid #000000', boxShadow: '3px 3px 0px #000000', display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', zIndex: 20 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '9px', fontWeight: 'bold' }}>
               <span style={{ width: '9px', height: '9px', borderRadius: '50%', backgroundColor: '#000000', display: 'inline-block' }}></span>
               DEPOT
@@ -2412,6 +2793,7 @@ export default function App() {
         {/* COLUMN 3: RIGHT INSPECTOR (KNOTEN- ODER KANTEN-AKTE) */}
         {(selectedNodeDetails || selectedLink || selectedRoute) && (
           <aside
+            className="inspector-aside"
             style={{
               width: '440px',
               height: '100%',
