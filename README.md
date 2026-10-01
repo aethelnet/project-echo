@@ -17,8 +17,8 @@ Klonen Sie das Repository und starten Sie die Infrastruktur:
 
 ```bash
 # 1. Repository klonen
-git clone https://github.com/ProphitEngine/ProphitEngine.git
-cd ProphitEngine
+git clone https://github.com/aethelnet/project-echo.git
+cd project-echo
 
 # 2. Datenbank (Neo4j) starten
 docker run -d --name project-echo-neo4j -p 7474:7474 -p 7687:7687 -e NEO4J_AUTH=none neo4j:5
