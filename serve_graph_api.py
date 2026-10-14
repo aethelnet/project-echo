@@ -60,13 +60,16 @@ def get_db_driver():
 # ==========================================================
 # 0. AUTHENTICATION & RESEARCHER GATE (Dual-Mode Session)
 # ==========================================================
+import hmac
+
 HTPASSWD_FILE = os.getenv("HTPASSWD_FILE", os.path.join(BASE_DIR, ".htpasswd_echo"))
-ECHO_RESEARCHER_KEY = os.getenv("ECHO_RESEARCHER_KEY", "marianne_restitution_2026")
+ECHO_RESEARCHER_KEY = os.getenv("ECHO_RESEARCHER_KEY", "").strip()
+DEFAULT_RESEARCHER_USER = os.getenv("ECHO_RESEARCHER_USER", "marianne").strip()
 
 def check_credentials(username: str, password: str) -> bool:
     if not password:
         return False
-    if password in (ECHO_RESEARCHER_KEY, "marianne_restitution_2026", "marianne"):
+    if ECHO_RESEARCHER_KEY and hmac.compare_digest(password, ECHO_RESEARCHER_KEY):
         return True
     
     # Check htpasswd files
@@ -111,21 +114,21 @@ def require_researcher(request: Request):
             except Exception:
                 pass
                 
-    if token and (token in (ECHO_RESEARCHER_KEY, "marianne_restitution_2026", "marianne") or check_credentials("marianne", token)):
+    if token and check_credentials(DEFAULT_RESEARCHER_USER, token):
         return True
 
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Schreiboperation verweigert: Diese Aktion erfordert Forscher-Authentifizierung (Marianne/Admin). Im Gast-Modus sind alle Lese- und Analysefunktionen frei verfügbar."
+        detail="Schreiboperation verweigert: Diese Aktion erfordert Forscher-Authentifizierung. Im Gast-Modus sind alle Lese- und Analysefunktionen frei verfügbar."
     )
 
 class LoginRequest(BaseModel):
-    username: Optional[str] = "marianne"
+    username: Optional[str] = "researcher"
     password: str
 
 @app.post("/api/auth/login")
 def auth_login(req: LoginRequest):
-    u = req.username or "marianne"
+    u = req.username or DEFAULT_RESEARCHER_USER
     if check_credentials(u, req.password):
         return {
             "success": True,
@@ -146,10 +149,10 @@ def auth_session(request: Request):
     
     is_auth = False
     if token:
-        is_auth = (token in (ECHO_RESEARCHER_KEY, "marianne_restitution_2026", "marianne")) or check_credentials("marianne", token)
+        is_auth = check_credentials(DEFAULT_RESEARCHER_USER, token)
     
     if is_auth:
-        return {"authenticated": True, "role": "RESEARCHER", "name": "Marianne"}
+        return {"authenticated": True, "role": "RESEARCHER", "name": DEFAULT_RESEARCHER_USER.capitalize()}
     
     return {"authenticated": False, "role": "GUEST", "name": "Gast-Forscher"}
 
