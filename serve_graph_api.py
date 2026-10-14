@@ -54,17 +54,78 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+_db_driver = None
+
 def get_db_driver():
-    return GraphDatabase.driver(NEO4J_URI, auth=None)
+    global _db_driver
+    if _db_driver is None:
+        _db_driver = GraphDatabase.driver(NEO4J_URI, auth=None)
+    return _db_driver
 
 # ==========================================================
 # 0. AUTHENTICATION & RESEARCHER GATE (Dual-Mode Session)
 # ==========================================================
+import base64
+import ctypes
+import ctypes.util
+import hashlib
 import hmac
 
 HTPASSWD_FILE = os.getenv("HTPASSWD_FILE", os.path.join(BASE_DIR, ".htpasswd_echo"))
 ECHO_RESEARCHER_KEY = os.getenv("ECHO_RESEARCHER_KEY", "").strip()
 DEFAULT_RESEARCHER_USER = os.getenv("ECHO_RESEARCHER_USER", "marianne").strip()
+
+_libcrypt = None
+_libcrypt_checked = False
+
+
+def _posix_crypt(password: str, salt_or_hash: str) -> Optional[str]:
+    """Resolves POSIX crypt() across Python <3.13 (stdlib crypt) and Python 3.13+ (libcrypt.so via ctypes)."""
+    try:
+        import crypt as _std_crypt  # type: ignore
+        return _std_crypt.crypt(password, salt_or_hash)
+    except ModuleNotFoundError:
+        pass
+
+    global _libcrypt, _libcrypt_checked
+    if not _libcrypt_checked:
+        _libcrypt_checked = True
+        libname = ctypes.util.find_library("crypt")
+        if libname:
+            try:
+                lib = ctypes.CDLL(libname)
+                lib.crypt.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
+                lib.crypt.restype = ctypes.c_char_p
+                _libcrypt = lib
+            except OSError:
+                _libcrypt = None
+
+    if _libcrypt is not None:
+        res = _libcrypt.crypt(password.encode("utf-8"), salt_or_hash.encode("utf-8"))
+        if res:
+            return res.decode("utf-8", errors="replace")
+    return None
+
+
+def _verify_htpasswd_hash(password: str, stored_hash: str) -> bool:
+    """Verifies an Apache/Nginx .htpasswd password entry ({SHA}, sha256$, or POSIX crypt $6$/$5$/$y$)."""
+    if not password or not stored_hash:
+        return False
+    if stored_hash.startswith("{SHA}"):
+        digest = base64.b64encode(hashlib.sha1(password.encode("utf-8")).digest()).decode("ascii")
+        return hmac.compare_digest(f"{{SHA}}{digest}", stored_hash)
+    if stored_hash.startswith("sha256$"):
+        parts = stored_hash.split("$", 2)
+        if len(parts) == 3:
+            _, salt, expected_hex = parts
+            calc = hashlib.sha256((salt + password).encode("utf-8")).hexdigest()
+            return hmac.compare_digest(calc, expected_hex)
+        return False
+    computed = _posix_crypt(password, stored_hash)
+    if computed is not None:
+        return hmac.compare_digest(computed, stored_hash)
+    return False
+
 
 def check_credentials(username: str, password: str) -> bool:
     if not password:
@@ -82,7 +143,6 @@ def check_credentials(username: str, password: str) -> bool:
     for p in ht_paths:
         if os.path.exists(p):
             try:
-                import crypt
                 with open(p, "r", encoding="utf-8") as f:
                     for line in f:
                         line = line.strip()
@@ -92,9 +152,9 @@ def check_credentials(username: str, password: str) -> bool:
                         if len(parts) == 2:
                             u, h = parts[0].strip(), parts[1].strip()
                             if username.lower() == u.lower():
-                                if crypt.crypt(password, h) == h:
+                                if _verify_htpasswd_hash(password, h):
                                     return True
-            except Exception:
+            except OSError:
                 pass
     return False
 

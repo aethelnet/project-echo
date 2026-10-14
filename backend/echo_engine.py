@@ -153,5 +153,5 @@ def trace_provenance():
     })
 
 if __name__ == '__main__':
-    print("🚀 Project Echo LGNN Engine Active on Port 5000")
-    app.run(port=5000, debug=True)
+    print("Project Echo LGNN Engine Active on Port 5000")
+    app.run(port=5000, debug=(os.getenv("FLASK_DEBUG", "0") == "1"))

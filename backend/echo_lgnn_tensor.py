@@ -25,19 +25,27 @@ class EchoProphitNet(nn.Module):
         # Apply sigmoid to normalize outputs to 0.0 - 1.0 (probabilities)
         return self.sigmoid(x)
 
-def liquid_entropy_loss(prediction, ground_truth_labels):
+def binary_shannon_entropy(prediction: torch.Tensor, eps: float = 1e-7) -> torch.Tensor:
     """
-    Calculates the contrastive Prediction Error.
-    Instead of predicting PnL, we predict the structural likelihood of a looted topology.
+    Computes binary Shannon entropy H(p) = -p log(p) - (1-p) log(1-p) >= 0 for probabilities p in [0, 1].
+    """
+    p = torch.clamp(prediction, eps, 1.0 - eps)
+    return -(p * torch.log(p) + (1.0 - p) * torch.log(1.0 - p))
+
+
+def liquid_entropy_loss(prediction: torch.Tensor, ground_truth_labels: torch.Tensor, alpha: float = 0.1) -> torch.Tensor:
+    """
+    Calculates MSE prediction error regularized by negative binary Shannon entropy
+    (overconfidence penalty: log(2) - H(p) >= 0, which is 0 at p=0.5 and maximal at p in {0, 1}).
     """
     mse_loss = nn.MSELoss()
     base_loss = mse_loss(prediction, ground_truth_labels)
-    
-    # Introduce Chaos/Entropy (Viscosity) to penalize overconfidence
-    entropy_penalty = torch.mean(prediction * torch.log(prediction + 1e-8))
-    
-    # Alpha = 0.1 for entropy injection
-    total_loss = base_loss + (0.1 * entropy_penalty)
+
+    import math
+    entropy = binary_shannon_entropy(prediction)
+    overconfidence_penalty = torch.mean(math.log(2.0) - entropy)
+
+    total_loss = base_loss + (alpha * overconfidence_penalty)
     return total_loss
 
 if __name__ == "__main__":
