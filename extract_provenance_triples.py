@@ -17,8 +17,7 @@ from typing import List, Dict, Any, Tuple, Optional
 try:
     from neo4j import GraphDatabase
 except ImportError:
-    print("[-] neo4j Driver nicht installiert! Bitte 'pip install neo4j' ausfuehren.")
-    sys.exit(1)
+    GraphDatabase = None
 
 try:
     import fitz  # PyMuPDF fuer performante PDF-Textextraktion
@@ -128,10 +127,12 @@ def triple_to_cypher(triple: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
     rel = triple["type"]
     rel_props = triple.get("rel_props", {})
 
+    src_lbl = "Objekt:Subjekt" if src["label"] in ("Objekt", "Subjekt") else src["label"]
+    tgt_lbl = "Objekt:Subjekt" if tgt["label"] in ("Objekt", "Subjekt") else tgt["label"]
     cypher = f"""
-    MERGE (s:{src['label']} {{{'inventarnummer' if src['label']=='Objekt' else 'name'}: $src_id}})
+    MERGE (s:{src_lbl} {{{'inventarnummer' if src['label'] in ('Objekt', 'Subjekt') else 'name'}: $src_id}})
     ON CREATE SET s += $src_props
-    MERGE (t:{tgt['label']} {{{'inventarnummer' if tgt['label']=='Objekt' else 'name'}: $tgt_id}})
+    MERGE (t:{tgt_lbl} {{{'inventarnummer' if tgt['label'] in ('Objekt', 'Subjekt') else 'name'}: $tgt_id}})
     ON CREATE SET t += $tgt_props
     MERGE (s)-[r:{rel}]->(t)
     ON CREATE SET r += $rel_props
@@ -152,7 +153,7 @@ def triple_to_cypher(triple: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
 # ==========================================================
 class BatchProvenancePipeline:
     def __init__(self):
-        # 1. Erweiterte Kolonialakteure & Handelshaeuser
+        # 1. Globale Referenz-Akteure, Offiziere & Kunsthaendler (erweiterbar + dynamischer Titel-NER-Fallback)
         self.known_actors = {
             "Hans Glauning": {"rolle": "Kolonialoffizier / Stationsleiter Bamenda", "daten": "1868–1908", "pattern": r"\bGlauning\b"},
             "Jesko von Puttkamer": {"rolle": "Gouverneur von Kamerun", "daten": "1855–1917", "pattern": r"\bPuttkamer\b"},
@@ -166,16 +167,26 @@ class BatchProvenancePipeline:
             "Georg August Zenker": {"rolle": "Stationsleiter Yaoundé / Botaniker", "daten": "1855–1922", "pattern": r"\bZenker\b"},
             "Gustav Conrau": {"rolle": "Kaufmann / Kolonialagent", "daten": "1865–1899", "pattern": r"\bConrau\b"},
             "Julius von Soden": {"rolle": "Erster Gouverneur von Kamerun", "daten": "1846–1921", "pattern": r"\bSoden\b"},
-            "J.F.G. Umlauff": {"rolle": "Koloniales Handelshaus Hamburg (Naturalien & Völkerkunde)", "daten": "1868–1974", "pattern": r"\bUmlauff\b"},
+            "J.F.G. Umlauff": {"rolle": "Koloniales Handelshaus Hamburg", "daten": "1868–1974", "pattern": r"\bUmlauff\b"},
             "Karl Adametz": {"rolle": "Kolonialoffizier / Stationsleiter Bamenda", "daten": "1879–1954", "pattern": r"\bAdametz\b"},
             "Hans Dominik": {"rolle": "Major der Schutztruppe / Stationsleiter Yaoundé", "daten": "1870–1910", "pattern": r"\bDominik\b"},
             "Hans Schipper": {"rolle": "Oberleutnant der Schutztruppe", "daten": "1875–1915", "pattern": r"\bSchipper\b"},
             "Max Buchner": {"rolle": "Reisender / Konsul / Ethnologe", "daten": "1846–1921", "pattern": r"\bBuchner\b"},
             "Richard Kund": {"rolle": "Kolonialoffizier / Expeditionsleiter", "daten": "1852–1904", "pattern": r"\bKund\b"},
-            "Hans Tappenbeck": {"rolle": "Kolonialoffizier / Expeditionsleiter", "daten": "1861–1889", "pattern": r"\bTappenbeck\b"}
+            "Hans Tappenbeck": {"rolle": "Kolonialoffizier / Expeditionsleiter", "daten": "1861–1889", "pattern": r"\bTappenbeck\b"},
+            # Globale Kolonialkontexte (Benin 1897, Asante, Dahomey, Maqdala, Namibia, Dakar-Djibouti, Kunsthandel)
+            "Harry Rawson": {"rolle": "Admiral / Befehlshaber Benin Punitive Expedition 1897", "daten": "1843–1910", "pattern": r"\bRawson\b"},
+            "Ralph Moor": {"rolle": "Consul-General Niger Coast Protectorate", "daten": "1860–1909", "pattern": r"\bRalph\s+Moor\b"},
+            "W.D. Webster": {"rolle": "Ethnografischer Kunsthaendler (Bicester/London)", "daten": "1868–1913", "pattern": r"\bWebster\b"},
+            "Augustus Pitt Rivers": {"rolle": "General & Sammler", "daten": "1827–1900", "pattern": r"\bPitt[\s-]+Rivers\b"},
+            "Alfred Dodds": {"rolle": "Général / Befehlshaber Dahomey-Feldzug 1892", "daten": "1842–1922", "pattern": r"\bDodds\b"},
+            "Marcel Griaule": {"rolle": "Leiter Mission Dakar-Djibouti (1931–1933)", "daten": "1898–1956", "pattern": r"\bGriaule\b"},
+            "Lothar von Trotha": {"rolle": "Kommandeur Schutztruppe Deutsch-Suedwestafrika", "daten": "1848–1920", "pattern": r"\bTrotha\b"},
+            "Robert Napier": {"rolle": "Befehlshaber Maqdala-Expedition 1868", "daten": "1810–1890", "pattern": r"\bNapier\b"},
+            "Garnet Wolseley": {"rolle": "Befehlshaber Anglo-Asante-Krieg 1874", "daten": "1833–1913", "pattern": r"\bWolseley\b"},
         }
 
-        # 2. Erweiterte Ziel-Institutionen / Museen
+        # 2. Weltweite Ziel-Institutionen, Museen & Auktionshaeuser (+ dynamischer Museums-NER-Fallback)
         self.known_institutions = {
             "Ethnologisches Museum Berlin": {"stadt": "Berlin", "kuerzel": "EM"},
             "Museum für Völkerkunde zu Leipzig": {"stadt": "Leipzig", "kuerzel": "Grassimuseum"},
@@ -188,10 +199,37 @@ class BatchProvenancePipeline:
             "Weltkulturen Museum Frankfurt": {"stadt": "Frankfurt", "kuerzel": "WMF"},
             "Städtisches Museum Braunschweig": {"stadt": "Braunschweig", "kuerzel": "SMB"},
             "Niedersächsisches Landesmuseum Hannover": {"stadt": "Hannover", "kuerzel": "NLM"},
-            "Johannes Gutenberg-Universität Mainz": {"stadt": "Mainz", "kuerzel": "JGU"}
+            "Johannes Gutenberg-Universität Mainz": {"stadt": "Mainz", "kuerzel": "JGU"},
+            "British Museum": {"stadt": "London", "kuerzel": "BM"},
+            "Pitt Rivers Museum": {"stadt": "Oxford", "kuerzel": "PRM"},
+            "Victoria and Albert Museum": {"stadt": "London", "kuerzel": "V&A"},
+            "Musée du quai Branly": {"stadt": "Paris", "kuerzel": "MQB"},
+            "AfricaMuseum Tervuren": {"stadt": "Tervuren", "kuerzel": "RMCA"},
+            "Weltmuseum Wien": {"stadt": "Wien", "kuerzel": "WMW"},
+            "Wereldmuseum Leiden": {"stadt": "Leiden", "kuerzel": "NMVW"},
+            "Metropolitan Museum of Art": {"stadt": "New York", "kuerzel": "MET"},
+            "Field Museum of Natural History": {"stadt": "Chicago", "kuerzel": "FMNH"},
+            "Smithsonian National Museum of African Art": {"stadt": "Washington, D.C.", "kuerzel": "NMAfA"},
         }
 
-        # 3. Ikonische benannte Kulturgueter (Fallbacks, falls im Text keine reine Ziffern-Inv-Nr steht)
+        # 3. Weltweite Herkunftsgemeinschaften / Historische Reiche (Kulturkontext-Erkennung)
+        self.origin_communities = {
+            "Kingdom of Benin (Edo)": r"\b(?:Benin(?:\s+City|\s+Bronz|\s+Kingdom|\s+Punitive|\s+1897)|Edo\s+Court|Oba\s+Ovonramwen)\b",
+            "Asante (Ghana)": r"\b(?:Asante|Ashanti|Kumasi|Manhyia)\b",
+            "Kingdom of Dahomey (Fon)": r"\b(?:Dahomey|Abomey|Béhanzin|Behanzin)\b",
+            "Nso (Kamerun)": r"\b(?:Nso|Kumbo|Kimbo|Ngonnso)\b",
+            "Bamum (Kamerun)": r"\b(?:Bamum|Bamun|Foumban|Njoya)\b",
+            "Bafut (Kamerun)": r"\b(?:Bafut)\b",
+            "Duala (Kamerun)": r"\b(?:Duala|Douala|Hickorytown|Bele-Bele)\b",
+            "Ovaherero & Nama (Namibia)": r"\b(?:Herero|Ovaherero|Nama|Witbooi|Südwestafrika)\b",
+            "Maji-Maji / Wahehe (Tansania)": r"\b(?:Maji[\s-]Maji|Wahehe|Mkwawa|Deutsch-Ostafrika)\b",
+            "Maqdala (Äthiopien)": r"\b(?:Maqdala|Magdala|Tewodros)\b",
+            "Kongo / Loango": r"\b(?:Kingdom\s+of\s+Kongo|Loango|Luba|Kuba|Bakongo)\b",
+            "Rapa Nui / Ozeanien": r"\b(?:Rapa\s+Nui|Hoa\s+Hakananai|Bismarck-Archipel|Luf-Boot|Maori|Aotearoa)\b",
+            "Yuanmingyuan (Qing)": r"\b(?:Yuanmingyuan|Summer\s+Palace|Sommerpalast|Boxeraufstand)\b",
+        }
+
+        # 4. Ikonische benannte Kulturgueter (Fallbacks ohne Ziffern-Inv-Nr)
         self.named_sacred_objects = {
             "Ngonnso": {
                 "inv": "Ngonnso (Ahnenfigur der Nso)",
@@ -213,86 +251,218 @@ class BatchProvenancePipeline:
                 "default_actor": "Max Buchner",
                 "default_delikt": "RAUBTE",
                 "default_depot": "Museum Fünf Kontinente München"
-            }
+            },
+            "Hoa Hakananai'a": {
+                "inv": "Oc1869,1005.1 (Hoa Hakananai'a)",
+                "bezeichnung": "Ahnen-Moai von Orongo (Rapa Nui)",
+                "default_actor": "Richard Powell",
+                "default_delikt": "ENTEIGNETE",
+                "default_depot": "British Museum"
+            },
         }
 
+    def _detect_dynamic_actors(self, text: str) -> List[Tuple[str, Dict[str, str]]]:
+        """Erkennt auch unbekannte historische Akteure weltweit anhand mehrsprachiger Rang-/Rollenmuster (DE/EN/FR)."""
+        dyn = []
+        title_pat = re.compile(
+            r"\b(Hauptmann|Oberleutnant|Leutnant|Major|Oberst|General|Gouverneur|Konsul|Admiral|"
+            r"Captain|Capt\.|Colonel|Col\.|Major-General|Brigadier|Sir|Governor|Consul|Commander|"
+            r"Commandant|Capitaine|Général|Gouverneur|Missionar|Collector|Dr\.|Prof\.)\s+"
+            r"([A-ZÄÖÜÉÈ][a-zäöüßéèê\-]+(?:\s+(?:von|van|de|du|Sir|[A-ZÄÖÜÉÈ]\.)\s*[A-ZÄÖÜÉÈ][a-zäöüßéèê\-]+|\s+[A-ZÄÖÜÉÈ][a-zäöüßéèê\-]+){0,2})"
+        )
+        for m in title_pat.finditer(text):
+            role_word, person_name = m.group(1).strip(), m.group(2).strip()
+            if len(person_name) >= 4 and person_name.lower() not in {"museum", "university", "collection", "berlin", "london", "paris"}:
+                full = f"{person_name}"
+                dyn.append((full, {"rolle": f"Historischer Akteur ({role_word})", "daten": ""}))
+        return dyn
+
+    def _detect_dynamic_institutions(self, text: str) -> List[Tuple[str, Dict[str, str]]]:
+        """Erkennt beliebige internationale Museen, Sammlungen und Auktionshaeuser (DE/EN/FR)."""
+        dyn = []
+        inst_pat = re.compile(
+            r"\b((?:Musée|Museum|Museo|Weltmuseum|Wereldmuseum)\s+(?:du\s+|de\s+l['’]?|of\s+|für\s+|am\s+)?[A-ZÄÖÜÉÈ][A-Za-zÄÖÜäöüßéèê\-\s]{3,36}|"
+            r"[A-ZÄÖÜÉÈ][A-Za-zÄÖÜäöüßéèê\-]+\s+(?:Museum|Art\s+Gallery)|Sotheby['’]s|Christie['’]s|Hôtel\s+Drouot)\b"
+        )
+        for m in inst_pat.finditer(text):
+            raw_inst = " ".join(m.group(1).split()).strip(" ,.;:()")
+            if 6 <= len(raw_inst) <= 55:
+                dyn.append((raw_inst, {"stadt": "International", "kuerzel": raw_inst[:6].upper()}))
+        return dyn
+
+    def _detect_origin_community(self, text: str) -> Optional[str]:
+        for comm, pat in self.origin_communities.items():
+            if re.search(pat, text, flags=re.IGNORECASE):
+                return comm
+        return None
+
+    @staticmethod
+    def _infer_depot_from_inventory_prefix(inv: str) -> Optional[Tuple[str, str]]:
+        u = inv.strip()
+        if re.match(r"^(?:Af|Am|Oc|As|Eu)\d{4},", u):
+            return ("British Museum", "London")
+        if re.match(r"^7[01]\.\d{4}\.", u):
+            return ("Musée du quai Branly", "Paris")
+        if u.upper().startswith("EO.0.") or u.upper().startswith("RG "):
+            return ("AfricaMuseum Tervuren", "Tervuren")
+        if re.match(r"^(?:III\s*[CEAF]|VI\s+\d)", u, flags=re.IGNORECASE):
+            return ("Ethnologisches Museum Berlin", "Berlin")
+        if u.upper().startswith("VK"):
+            return ("Linden-Museum Stuttgart", "Stuttgart")
+        if u.upper().startswith("C ") or u.upper().startswith("C_"):
+            return ("Museum am Rothenbaum (MARKK)", "Hamburg")
+        return None
+
     def parse_text_page(self, page_num: int, text: str, source_doc: str) -> List[Dict[str, Any]]:
-        """Extrahiert Triples aus einer Textseite (TXT oder PDF)."""
+        """Extrahiert Provenienz-Triples sprach- und regionsuebergreifend (DE / EN / FR, global)."""
         triples = []
         beleg_str = f"{source_doc}, S. {page_num}"
 
-        # 1. Inventarnummern-Muster
-        inv_pattern = r'\b(III\s*[A-Z]\s*\d+(?:\/\d+)?|[A-Z]{1,2}\s*\d{4,6}|Inv\.?-?\s*Nr\.?\s*[A-Za-z0-9\/-]+|VK\s*\d+)\b'
-        matches = re.findall(inv_pattern, text)
-
+        # 1. Globale Inventarnummern-Grammatik (DE, UK/BM, FR/MQB, BE/RMCA, US, Generisch)
+        inv_patterns = [
+            r"\b(?:Af|Am|Oc|As|Eu)\d{4},\d{3,5}\.\d+[a-z]?\b",          # British Museum (z.B. Af1897,0511.1)
+            r"\b7[01]\.\d{4}\.\d+\.\d+(?:\.\d+)?\b",                    # Musée du quai Branly (z.B. 71.1892.34.1)
+            r"\bEO\.0\.0\.\d{3,6}\b",                                   # AfricaMuseum Tervuren
+            r"\b(?:III|IV|V|VI)\s*[A-Z]\s*\d+(?:[\/a-zA-Z0-9-]+)?\b",   # Berliner/Deutsche Völkerkunde-Kürzel
+            r"\b(?:VK|MAf|IM|EA|USNM)\s*[\.-]?\s*\d{3,7}(?:[\.-]\d+)?\b",
+            r"\b(?:Inv\.?-?\s*Nr\.?|Acc\.?\s*No\.?|Cat\.?\s*No\.?|Obj\.?-?\s*Nr\.?)\s*[A-Za-z0-9\.,\/-]{2,20}\b",
+            r"\b[A-Z]{1,2}\s*\d{4,6}\b",
+            r"\b\d{4}\.\d{2,4}\.\d{1,4}\b",                             # Anglo-amerikanische Jahres-Akzession (z.B. 1897.34.12)
+        ]
         clean_invs = set()
-        for m in matches:
-            c = re.sub(r'\s+', ' ', m).strip()
-            if not re.match(r'^\d{5}$', c) and not c.startswith("978"):
-                clean_invs.add(c)
+        for pat in inv_patterns:
+            for m in re.findall(pat, text):
+                c = re.sub(r"\s+", " ", m).strip(" .,;:")
+                if not re.match(r"^\d{5}$", c) and not c.startswith("978") and len(c) >= 4:
+                    clean_invs.add(c)
 
-        # 2. Akteurserkennung
-        found_actors = []
+        # 2. Akteurserkennung (Referenzliste + dynamischer mehrsprachiger Titel-NER)
+        found_actors: List[Tuple[str, Dict[str, str]]] = []
+        seen_actor_names = set()
         for name, meta in self.known_actors.items():
             pattern = meta.get("pattern", rf"\b{re.escape(name.split()[-1])}\b")
             if re.search(pattern, text):
                 found_actors.append((name, meta))
+                seen_actor_names.add(name.lower())
+        for d_name, d_meta in self._detect_dynamic_actors(text):
+            if not any(d_name.lower() in ex or ex in d_name.lower() for ex in seen_actor_names):
+                found_actors.append((d_name, d_meta))
+                seen_actor_names.add(d_name.lower())
 
-        # 3. Institutionserkennung
-        found_insts = []
+        # 3. Institutionserkennung (Referenzliste + dynamischer Museums-NER)
+        found_insts: List[Tuple[str, Dict[str, str]]] = []
+        seen_inst_names = set()
         for inst_name, meta in self.known_institutions.items():
-            if inst_name in text or meta["kuerzel"] in text or (meta["stadt"] in text and ("Museum" in text or "Sammlung" in text)):
+            if inst_name in text or re.search(rf"\b{re.escape(meta['kuerzel'])}\b", text) or (
+                meta["stadt"] in text and any(w in text for w in ("Museum", "Musée", "Sammlung", "Collection"))
+            ):
                 found_insts.append((inst_name, meta))
+                seen_inst_names.add(inst_name.lower())
+        for d_inst, d_imeta in self._detect_dynamic_institutions(text):
+            if not any(d_inst.lower() in ex or ex in d_inst.lower() for ex in seen_inst_names):
+                found_insts.append((d_inst, d_imeta))
+                seen_inst_names.add(d_inst.lower())
 
-        # 4. Delikt-Typologie
-        is_raub = any(w in text.lower() for w in ["raub", "geplündert", "plünderten", "soldateska", "kriegsbeute", "angriff", "punitive", "strafexpedition", "strafzug"])
-        is_enteignung = any(w in text.lower() for w in ["enteignung", "angeeignet", "abgenommen", "erzwungen", "beschlagnahmt", "abgetreten"])
-        is_transfer = any(w in text.lower() for w in ["schenkung", "übergeben", "geschenkt", "verkauft", "übersendung", "erwerb", "ankauf", "erworben"])
+        # 4. Mehrsprachige Delikt- & Erwerbs-Typologie (DE + EN + FR)
+        t_low = text.lower()
+        is_raub = any(
+            w in t_low
+            for w in [
+                "raub", "geplündert", "plünderten", "soldateska", "kriegsbeute", "angriff", "strafexpedition", "strafzug",
+                "punitive expedition", "loot", "looted", "plundered", "captured", "sacked", "pillaged", "spoils of war", "seized during",
+                "pillage", "pillé", "butin", "expédition punitive", "prise de guerre",
+            ]
+        )
+        is_enteignung = any(
+            w in t_low
+            for w in [
+                "enteignung", "angeeignet", "abgenommen", "erzwungen", "beschlagnahmt", "abgetreten",
+                "confiscated", "expropriated", "coerced", "duress", "tribute", "surrendered",
+                "confisqué", "extorqué", "réquisition",
+            ]
+        )
+        is_sale = any(w in t_low for w in ["verkauft", "ankauf", "auktion", "sold", "purchased", "auction", "vendu", "acheté", "vente"])
+        is_gift = any(w in t_low for w in ["schenkung", "geschenk", "donated", "gift of", "bequeathed", "presented by", "don de", "legs"])
 
-        years = re.findall(r'\b(188\d|189\d|190\d|191\d|192\d)\b', text)
+        years = re.findall(r"\b(18[5-9]\d|19[0-5]\d)\b", text)
         event_year = int(years[0]) if years else None
+        community = self._detect_origin_community(text)
+
+        # Mehrsprachige Objekttyp-Heuristik (DE / EN / FR)
+        def _infer_object_desc() -> str:
+            type_map = [
+                (("bronze plaque", "reliefplatte", "benin bronze", "plaque"), "Gegossene Reliefplatte / Bronze"),
+                (("ivory tusk", "elfenbein", "geschnitzter stoßzahn", "ivoire"), "Beschnitztes Elfenbein-Kulturgut"),
+                (("commemorative head", "gedenkkopf", "kopf eines oba", "uhunmwun"), "Königlicher Gedenkkopf"),
+                (("trommel", "slit drum", "drum", "tambour"), "Zeremonialtrommel"),
+                (("thron", "throne", "stool", "trône", "golden stool"), "Königsthron / Herrschersitz"),
+                (("maske", "mask", "masque"), "Ritualmaske"),
+                (("figur", "figure", "statue", "ahnenfigur", "nkisi", "reliquary"), "Sakrale Skulptur / Ahnenfigur"),
+                (("pfeife", "pipe"), "Würdenträgerpfeife"),
+                (("zepter", "sceptre", "staff", "fly-whisk"), "Herrscherstab / Insignie"),
+                (("manuskript", "manuscript", "tabot"), "Sakrales Manuskript / Kultobjekt"),
+            ]
+            for keys, label in type_map:
+                if any(k in t_low for k in keys):
+                    return f"{label} ({community})" if community else label
+            return f"Kulturgut ({community})" if community else "Koloniales Kulturgut"
 
         # 5. Triples fuer identifizierte Inventarnummern
-        for inv in clean_invs:
-            obj_desc = "Koloniales Kulturgut"
-            if "trommel" in text.lower(): obj_desc = "Zeremonialtrommel"
-            elif "thron" in text.lower(): obj_desc = "Königsthron / Mandu Yenu"
-            elif "maske" in text.lower(): obj_desc = "Ritualmaske"
-            elif "figur" in text.lower(): obj_desc = "Ahnenfigur"
-            elif "pfeife" in text.lower(): obj_desc = "Häuptlingspfeife"
-            elif "zepter" in text.lower(): obj_desc = "Herrscherzepter"
-
-            # Kante: Objekt -> Institution (LAGERT_IN)
+        for inv in sorted(clean_invs):
+            obj_desc = _infer_object_desc()
+            inferred_depot = self._infer_depot_from_inventory_prefix(inv)
             if found_insts:
                 inst_name, inst_meta = found_insts[0]
+            elif inferred_depot:
+                inst_name, inst_meta = inferred_depot[0], {"stadt": inferred_depot[1]}
+            else:
+                inst_name, inst_meta = None, None
+
+            obj_props: Dict[str, Any] = {"bezeichnung": obj_desc, "inventarnummer": inv}
+            if community:
+                obj_props["herkunft"] = community
+
+            if inst_name:
                 triples.append({
                     "type": "LAGERT_IN",
-                    "source": {"label": "Objekt", "id": inv, "props": {"bezeichnung": obj_desc, "inventarnummer": inv}},
-                    "target": {"label": "Institution", "id": inst_name, "props": {"name": inst_name, "stadt": inst_meta["stadt"]}},
+                    "source": {"label": "Objekt", "id": inv, "props": obj_props},
+                    "target": {"label": "Institution", "id": inst_name, "props": {"name": inst_name, "stadt": inst_meta.get("stadt", "")}},
                     "rel_props": {"beleg": beleg_str, "status": "Dokumentierter Depotbestand", "jahr": event_year}
                 })
 
-            # Kante: Akteur -> Objekt
             if found_actors:
                 act_name, act_meta = found_actors[0]
-                rel_type = "RAUBTE" if is_raub else ("ENTEIGNETE" if is_enteignung else "EIGNETE_SICH_AN")
+                if is_raub:
+                    rel_type = "RAUBTE"
+                elif is_enteignung:
+                    rel_type = "ENTEIGNETE"
+                elif is_sale and not (is_raub or is_enteignung):
+                    rel_type = "VERKAUFTE_AN"
+                elif is_gift and not (is_raub or is_enteignung):
+                    rel_type = "SCHENKTE"
+                else:
+                    rel_type = "EIGNETE_SICH_AN"
+
                 triples.append({
                     "type": rel_type,
-                    "source": {"label": "Akteur", "id": act_name, "props": {"name": act_name, "rolle": act_meta["rolle"], "lebensdaten": act_meta["daten"]}},
-                    "target": {"label": "Objekt", "id": inv, "props": {"bezeichnung": obj_desc, "inventarnummer": inv}},
-                    "rel_props": {"beleg": beleg_str, "jahr": event_year, "delikt": rel_type}
+                    "source": {"label": "Akteur", "id": act_name, "props": {"name": act_name, "rolle": act_meta["rolle"], "lebensdaten": act_meta.get("daten", "")}},
+                    "target": {"label": "Objekt", "id": inv, "props": obj_props},
+                    "rel_props": {"beleg": beleg_str, "jahr": event_year, "delikt": rel_type, **({"herkunft": community} if community else {})}
                 })
 
-                # Kante: Akteur -> Institution (Transfer / Handel)
-                if found_insts:
-                    inst_name, inst_meta = found_insts[0]
-                    if act_name == "J.F.G. Umlauff" or "verkauft" in text.lower() or "handel" in text.lower():
-                        t_type = "VERKAUFTE_AN"
-                    elif "schenkung" in text.lower() or "geschenk" in text.lower():
-                        t_type = "SCHENKTE"
-                    else:
-                        t_type = "UEBERGAB_AN"
+                # Wenn sowohl Raubkontext als auch spaetere Museums-Schenkung/Ankauf im selben Abschnitt stehen -> Multigraph-Kollision direkt erfassen!
+                if (is_raub or is_enteignung) and (is_gift or is_sale):
+                    claim_rel = "SCHENKTE" if is_gift else "VERKAUFTE_AN"
+                    claim_actor = found_actors[1][0] if len(found_actors) > 1 else act_name
+                    triples.append({
+                        "type": claim_rel,
+                        "source": {"label": "Akteur", "id": claim_actor, "props": {"name": claim_actor, "rolle": "Einlieferer / Haendler"}},
+                        "target": {"label": "Objekt", "id": inv, "props": {**obj_props, "contested": True}},
+                        "rel_props": {"beleg": beleg_str, "jahr": event_year, "narrativ": "MUSEUMS_NARRATIV", "kollision": True}
+                    })
 
+                if inst_name:
+                    t_type = "VERKAUFTE_AN" if (act_name in ("J.F.G. Umlauff", "W.D. Webster") or is_sale) else ("SCHENKTE" if is_gift else "UEBERGAB_AN")
                     triples.append({
                         "type": t_type,
                         "source": {"label": "Akteur", "id": act_name, "props": {"name": act_name}},
@@ -351,6 +521,22 @@ class BatchProvenancePipeline:
                     triples.extend(self.parse_text_page(idx, p, doc_label))
 
         print(f"    └── {len(triples)} Triples aus {doc_name} extrahiert.")
+        return triples
+
+    def parse_csv_file(self, filepath: str) -> List[Dict[str, Any]]:
+        """Verarbeitet beliebige internationale CSV/TSV-Inventar- oder Expeditionslisten."""
+        import csv
+        doc_name = os.path.basename(filepath)
+        triples = []
+        with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
+            sample = f.read(4096)
+            f.seek(0)
+            delim = ";" if sample.count(";") > sample.count(",") else ("\t" if "\t" in sample else ",")
+            reader = csv.reader(f, delimiter=delim)
+            for row_idx, row in enumerate(reader, start=1):
+                joined = " | ".join(c.strip() for c in row if c and c.strip())
+                if len(joined) > 12:
+                    triples.extend(self.parse_text_page(row_idx, joined, doc_name))
         return triples
 
     def parse_pdf_file(self, filepath: str) -> List[Dict[str, Any]]:

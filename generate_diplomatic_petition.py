@@ -7,7 +7,12 @@ gestützt auf die Haager Landkriegsordnung (HLKO 1899/1907) und die Washingtoner
 
 import os
 from datetime import datetime
-from neo4j import GraphDatabase
+from typing import Optional
+
+try:
+    from neo4j import GraphDatabase
+except ImportError:
+    GraphDatabase = None
 
 try:
     from reportlab.lib.pagesizes import A4
@@ -15,38 +20,51 @@ try:
     from reportlab.lib.units import mm
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+    _HAS_REPORTLAB = True
 except ImportError:
-    print("[-] reportlab nicht installiert! Bitte 'pip install reportlab' ausfuehren.")
-    exit(1)
+    _HAS_REPORTLAB = False
 
 NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DOSSIER_DIR = os.getenv("DOSSIER_DIR", os.path.join(BASE_DIR, "shadow-museum-atlas", "data_dropzone", "dossiers"))
 
-def query_stolen_objects(institution: str, community: str = "Nso"):
+def query_stolen_objects(institution: str, community: str = "Nso", actor: Optional[str] = None, limit: int = 200):
     """
-    Holt alle Geraubten Objekte fuer eine spezifizierte Community aus einer spezifizierten Institution.
-    Da die Community aktuell oft als Text in der Bezeichnung oder in der Begruendung versteckt ist,
-    nutzen wir einen CONTAINS Filter.
+    Holt alle geraubten Objekte fuer eine Institution (optional gefiltert nach Community / Akteur).
     """
-    driver = GraphDatabase.driver(NEO4J_URI, auth=None)
-    cypher = """
-    MATCH (a:Akteur)-[r:RAUBTE|VERDACHT_AUF|ENTEIGNETE|EIGNETE_SICH_AN]->(s:Subjekt)-[:LAGERT_IN]->(i:Institution)
-    WHERE toLower(i.name) CONTAINS toLower($inst)
-      AND (toLower(s.bezeichnung) CONTAINS toLower($comm) OR toLower(r.begruendung) CONTAINS toLower($comm) OR toLower(r.zitat) CONTAINS toLower($comm))
-    RETURN s.inventarnummer AS inv, s.bezeichnung AS bez, a.name AS akteur, type(r) AS delikt, r.beleg AS beleg, r.zeit AS zeit, r.expedition AS exp, r.zitat AS zitat
-    ORDER BY s.inventarnummer
-    LIMIT 200
-    """
-    with driver.session() as s:
-        result = s.run(cypher, {"inst": institution, "comm": community}).data()
-    driver.close()
-    return result
+    if GraphDatabase is not None:
+        try:
+            driver = GraphDatabase.driver(NEO4J_URI, auth=None, connection_timeout=0.5)
+            cypher = """
+            MATCH (a:Akteur)-[r:RAUBTE|VERDACHT_AUF|ENTEIGNETE|EIGNETE_SICH_AN]->(s:Subjekt)-[:LAGERT_IN]->(i:Institution)
+            WHERE toLower(i.name) CONTAINS toLower($inst)
+              AND ($comm = '' OR toLower(coalesce(s.bezeichnung, '')) CONTAINS toLower($comm)
+                   OR toLower(coalesce(r.begruendung, '')) CONTAINS toLower($comm)
+                   OR toLower(coalesce(r.zitat, '')) CONTAINS toLower($comm))
+              AND ($actor = '' OR toLower(a.name) CONTAINS toLower($actor))
+            RETURN s.inventarnummer AS inv, s.bezeichnung AS bez, a.name AS akteur, type(r) AS delikt,
+                   r.beleg AS beleg, coalesce(r.jahr, r.zeit) AS zeit, r.expedition AS exp, r.zitat AS zitat
+            ORDER BY s.inventarnummer
+            LIMIT $limit
+            """
+            with driver.session() as s:
+                result = s.run(cypher, {"inst": institution, "comm": community or "", "actor": actor or "", "limit": limit}).data()
+            driver.close()
+            if result:
+                return result
+        except Exception:
+            pass
+
+    from backend.embedded_graph import EMBEDDED_STORE
+    return EMBEDDED_STORE.query_stolen_objects(institution, community=community, actor=actor, limit=limit)
 
 def generate_petition_pdf(institution: str, community: str, output_path: str):
     objects = query_stolen_objects(institution, community)
     if not objects:
         return None
+    if not _HAS_REPORTLAB:
+        from backend.pdf_forensics import render_petition_pdf_fitz
+        return render_petition_pdf_fitz(institution, community, objects, output_path)
 
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
     doc = SimpleDocTemplate(

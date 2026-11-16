@@ -9,7 +9,10 @@ import os
 import gzip
 import json
 import time
-from neo4j import GraphDatabase
+try:
+    from neo4j import GraphDatabase
+except ImportError:
+    GraphDatabase = None
 
 NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
 SEED_FILE = os.getenv("SEED_FILE", os.path.join(os.path.dirname(__file__), "seed_graph.json.gz"))
@@ -54,9 +57,9 @@ def run_import():
     with driver.session() as session:
         for lbl, n_list in nodes_by_label.items():
             if lbl in ["Objekt", "Subjekt"]:
-                cypher = f"""
+                cypher = """
                 UNWIND $batch AS item
-                MERGE (n:{lbl} {{inventarnummer: item.props.inventarnummer}})
+                MERGE (n:Objekt:Subjekt {inventarnummer: item.props.inventarnummer})
                 SET n += item.props
                 """
             elif lbl == "Publikation":

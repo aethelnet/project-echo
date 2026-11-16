@@ -49,7 +49,7 @@ def liquid_entropy_loss(prediction: torch.Tensor, ground_truth_labels: torch.Ten
     return total_loss
 
 if __name__ == "__main__":
-    logger.info("🕸️ Initializing Project Echo LGNN Tensor Engine...")
+    logger.info("Initializing Project Echo LGNN Tensor Engine...")
     
     # Simulate a CLIP/HuggingFace Vector Embedding (e.g. from an artifact's text + image)
     # Batch size 1, Embedding Dim 768

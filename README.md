@@ -1,67 +1,68 @@
-# Project Echo: Autonomous Provenance Hunter
-**Forschungsumgebung für Provenienzforschung und Netzwerkanalyse**
+# Project Echo // Shadow Museum Provenance Atlas
 
-Dieses Tool wurde für Forscher entwickelt, um koloniale Raubgut-Netzwerke, Akteure und Institutionen dynamisch zu erfassen, zu visualisieren und mit Live-Daten abzugleichen.
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPLv3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
+[![Architecture](https://img.shields.io/badge/Engine-FastAPI%20%2B%20Embedded%20Graph%20%7C%20Neo4j-black)](#)
+[![Legal Basis](https://img.shields.io/badge/Forensics-HLKO%20Art.%2056%20%7C%20Washington%20Principles-991b1b)](#)
 
-## Lokale Installation & Start (Für Studenten & Forschungsgruppen)
-
-Um ein komplett eigenes, privates Netzwerk auf dem eigenen Rechner (z.B. an der TU Berlin) aufzubauen, müssen Sie das System lokal starten.
-
-### Systemvoraussetzungen
-- **Docker** (für die Neo4j-Datenbank)
-- **Python 3.10+**
-- **Node.js 18+**
-
-### 1. Umgebung starten
-Klonen Sie das Repository und starten Sie die Infrastruktur:
-
-```bash
-# 1. Repository klonen
-git clone https://github.com/aethelnet/project-echo.git
-cd project-echo
-
-# 2. Datenbank (Neo4j) starten
-docker run -d --name project-echo-neo4j -p 7474:7474 -p 7687:7687 -e NEO4J_AUTH=none neo4j:5
-
-# 3. Backend (FastAPI) starten
-pip install -r requirements.txt
-uvicorn serve_graph_api:app --host 0.0.0.0 --port 8088
-
-# 4. Frontend starten (in einem neuen Terminal-Fenster)
-cd shadow-museum-atlas
-npm install
-npm run dev
-```
-Das Interface ist nun unter `http://localhost:5173` in Ihrem Browser erreichbar.
-
-## Für Forscher: Der Blank-Canvas-Workflow
-
-Wenn Sie mit einem komplett neuen Datensatz oder Forschungsfokus (z.B. einer anderen Region oder Epoche) starten wollen, können Sie das System auf einen **Blank Canvas** (Zero-State) zurücksetzen. 
-
-### 1. Datenbank zurücksetzen
-Um die Neo4j-Graphdatenbank vollständig zu leeren und alte Testdaten zu löschen:
-1. Öffnen Sie Ihr Terminal.
-2. Führen Sie den folgenden Befehl aus, um den Reset-Endpoint anzusteuern:
-   ```bash
-   curl -X DELETE http://localhost:8088/api/admin/reset
-   ```
-   *Alternativ können Sie in der Weboberfläche im Admin-Bereich (falls aktiviert) auf "Reset Graph" klicken.*
-3. Die Datenbank ist nun leer.
-
-### 2. Eigene Daten einspeisen (Dropzone)
-Sie können eigene Forschungsdokumente hochladen, aus denen das System automatisch Akteure, Objekte und Kanten (Beziehungen) extrahiert.
-- **Unterstützte Formate:** `.pdf` (Forschungsartikel, Buchscans), `.xlsx` / `.xls` (Inventarlisten, Expeditionsdatenbanken), `.txt` (Rohdaten).
-- **Wie laden?** Nutzen Sie den Button "Dokument hochladen" im Web-Frontend oder legen Sie die Dateien manuell in das konfigurierte `dropzone`-Verzeichnis.
-
-### 3. Automatischer Abgleich mit Museums-APIs (DDB)
-Wenn ein neues Dokument hochgeladen wird, extrahiert die Pipeline (z.B. `autonomous_provenance_hunter.py`) die genannten Kulturgüter (z.B. "Nso-Thron").
-- Das System sucht anschließend **vollautomatisch im Hintergrund** über die API der Deutschen Digitalen Bibliothek (DDB) und museum-digital nach diesen Objekten.
-- Gibt es einen Treffer (z.B. im Linden-Museum Stuttgart), wird vollautomatisch die Kante `[:LAGERT_IN]` in Ihren Graphen eingezeichnet und mit dem Live-Standort sowie der Inventarnummer verknüpft.
-
-### 4. Makro-Ansicht (Umgang mit über 40.000 Objekten)
-Sobald Ihr Graph sehr groß wird (> 10.000 Knoten), schaltet das System automatisch in den hierarchischen **Makro-Modus**. 
-- Es werden nicht alle 40.000 Objekte einzeln gerendert, sondern als massiver Aggregations-Cluster (z.B. "14.500 Objekte im Linden-Museum").
-- **Drill-Down:** Klicken Sie doppelt auf einen Cluster-Knoten, um gezielt nur diese Sub-Menge an Objekten zu laden und im Detail zu analysieren, ohne dass der Browser überlastet wird.
+**Project Echo (`Shadow Museum Provenance Atlas`)** ist eine forensische Graph- und Geodaten-Forschungsumgebung zur Rekonstruktion kolonialer Provenienz-Netzwerke (Kamerun 1884–1916), zur Aufdeckung musealer Narrativ-Kollisionen (*"Schenkung"* vs. *Militärischer Raubzug*) und zur automatisierten Erstellung gerichtsverwertbarer PDF-Restitutionsdossiers.
 
 ---
-*Bei technischen Fragen wenden Sie sich an den Systemadministrator oder prüfen Sie die Logs im `backend`-Container.*
+
+## Kernfunktionen
+
+1. **Dual-Engine Wissensgraph (Zero-Docker Embedded Store + optionales Neo4j Bolt)**:
+   - Startet **sofort ohne Docker** direkt aus dem verifizierten Forschungs-Snapshot `seed_graph.json.gz` (**`2.223` Knoten**, **`6.628` belegte Relationen**, `2.148` Kulturgut-Subjekte, `60` koloniale Akteure, `8` deutsche Museumsdepots, `7` Primärpublikationen).
+   - Verbindet sich automatisch mit einer lokalen oder externen **Neo4j-5-Instanz** (`bolt://localhost:7687`), sobald diese verfügbar ist (für > 40.000 Objekte im Makro-Cluster-Modus).
+
+2. **Multigraph-Dissonanz & Forensische Spezialfilter**:
+   - **Contested Narratives (`1.999` Kollisionen)**: Stellt offizielle Museumsinventar-Einträge (`SCHENKTE` / `VERKAUFTE_AN`) unmittelbar den militärischen Primärquellen (`RAUBTE` / `ENTEIGNETE` mit Seitenzahl-Belegen u. a. aus dem *Atlas der Abwesenheit*) gegenüber.
+   - **Provenienzlücken (`83` Depots ohne Erwerbskette)** inklusive Ein-Klick-Generator für Auskunftsersuchen nach dem Informationsfreiheitsgesetz (IFG).
+   - **Ghost-Subjekte & Probabilistische Verdachtskanten (`VERDACHT_AUF`)**: Identifiziert verschollene Beutekunst ohne heutigen Depotnachweis sowie zeitlich-räumliche Expeditions-Korrelationen.
+
+3. **Geodätische Restitutions-Karte (`[GEO-KARTE (RESTITUTION)]`) & POI-Fallakte**:
+   - Interaktive Projektion von `48` historischen Polities/Distrikten Kameruns, `243` dokumentierten Militär- und Strafexpeditionen und `71` Depot-Transfervektoren nach Europa sowie ein kuratierbares **Leitobjekt-Pinboard (`POIs`)** für gezielte Einzelfall-Restitutionen.
+
+4. **Visuelle Foto-Ketten-Forensik (`[BILD-FORENSIK (FOTO-KETTE)]`)**:
+   - Rekonstruiert Objektbiografien **ohne durchgängige Inventarnummer** allein über datierte historische Bildreihen (*Feldaufnahme Glasplatte 1902* $\rightarrow$ *Händlerkatalog 1908* $\rightarrow$ *heutige Depotaufnahme*).
+   - **Kulturell respektvolle Strukturgeometrie statt Pauschal-Stil-KI**: Beleuchtungsinvariante `RootSIFT-128D` Mikrostruktur-Deskriptoren kombiniert mit striktem **6-DOF Affin-RANSAC** und kalibrierter **Shannon-Entropie $H(p)$** weisen verwandte Schnitzwerke derselben Kultur sauber als Nicht-Identisch zurück und geben Spuren erst nach **Human-in-the-Loop-Fachprüfung** in den Wissensgraphen frei.
+
+5. **Globale Mehrsprachige Quellen-Ingestion (`DE / EN / FR`) & HLKO-Restitutionspakete**:
+   - Erkennt neben deutschen Sammlungen (`III C`, `VK`) weltweit Inventarformate (`British Museum Af1897,...`, `Musée du quai Branly 71.1892...`, `AfricaMuseum Tervuren EO.0.0...`), internationale Museen, Herkunftsgemeinschaften (u. a. *Benin/Edo, Asante, Dahomey, Nso, Bamum, Ovaherero/Nama, Maji-Maji, Maqdala, Rapa Nui*) sowie dynamisch betitelte historische Akteure in PDF-, TXT-, CSV- und XLSX-Quellen.
+   - Erzeugt per Klick druckreife **Einzel-Restitutionsdossiers (PDF)**, **Routen-/Akteurs-Sammelarchive (ZIP)** sowie asynchrone **völkerrechtliche Restitutionsersuchen nach Art. 46, 47, 56 HLKO**.
+
+---
+
+## Schnelleinstieg (Zero-Docker)
+
+```bash
+# 1. Python-Abhängigkeiten & Frontend-Bundle einmalig bauen
+pip install -r requirements.txt
+cd shadow-museum-atlas && npm install && npm run build && cd ..
+
+# 2. Komplettes System (API + kompiliertes Shadow-Museum-Frontend) auf Port 8088 starten
+python3 serve_graph_api.py
+```
+
+Im Browser öffnen:
+**[http://localhost:8088](http://localhost:8088)**
+
+*(Für Schreiboperationen wie Annotationen, manuelle Kanten oder Dokument-Uploads `ECHO_RESEARCHER_KEY` setzen, z. B. `ECHO_RESEARCHER_KEY=mein-schluessel python3 serve_graph_api.py`.)*
+
+### Optional: Frontend-Entwicklungsmodus & Neo4j-Skalierung
+```bash
+# Optionales Neo4j-Backend via Docker:
+docker run -d --name project-echo-neo4j -p 7474:7474 -p 7687:7687 -e NEO4J_AUTH=none neo4j:5
+python3 import_seed.py
+
+# Frontend neu bauen:
+cd shadow-museum-atlas && npm install && npm run build
+```
+
+---
+
+## Integritäts- & Sicherheits-Testsuite
+
+```bash
+python3 -m unittest discover tests -v
+```
+Prüft Authentifizierung (`{SHA}`, `sha256$`, POSIX `$6$` crypt, Gast-/Forscher-Isolierung), alle Embedded-Graph-Endpunkte, PDF-/ZIP-/HLKO-Generierung, Pfad-Traversal-Schutz sowie die Shannon-Entropie-Invarianten (`backend/echo_lgnn_tensor.py`).

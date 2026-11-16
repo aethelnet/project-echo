@@ -56,3 +56,8 @@ shadow-museum-atlas/node_modules/
 .vscode/
 *.swp
 *.swo
+
+# Runtime Generated Artifacts
+dossiers/
+shadow-museum-atlas/data_dropzone/verified_research/photo_forensics_demo/
+shadow-museum-atlas/data_dropzone/verified_research/graph_layout.json

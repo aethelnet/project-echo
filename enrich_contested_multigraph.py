@@ -14,7 +14,10 @@ Zwischen Akteur und Objekt existieren zwei parallele Kanten:
 
 import os
 import sys
-from neo4j import GraphDatabase
+try:
+    from neo4j import GraphDatabase
+except ImportError:
+    GraphDatabase = None
 
 NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
 NEO4J_USER = os.getenv("NEO4J_USER", "")
@@ -80,8 +83,12 @@ ICONIC_CONTESTED_CASES = {
 }
 
 def enrich_contested():
+    if GraphDatabase is None:
+        from backend.embedded_graph import EMBEDDED_STORE
+        EMBEDDED_STORE.recompute_contested_flags()
+        return
     auth = (NEO4J_USER, NEO4J_PASSWORD) if NEO4J_USER else None
-    driver = GraphDatabase.driver(NEO4J_URI, auth=auth)
+    driver = GraphDatabase.driver(NEO4J_URI, auth=auth, connection_timeout=0.5)
     
     with driver.session() as session:
         print("[+] Starte Multigraph-Dissonanz-Injektion in Neo4j...")

@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import ForceGraph2D from 'react-force-graph-2d';
 import GeodataMap from './GeodataMap';
+import VisualForensicsView from './VisualForensicsView';
 
 type MetricFilter = null | 'subjekte' | 'raub' | 'schenkung' | 'dissonanz' | 'verdacht' | 'akteure' | 'depots' | 'luecken';
 
@@ -22,8 +23,8 @@ export default function App() {
   const [hoveredLink, setHoveredLink] = useState<any>(null);
   const [searchTerm, setSearchTerm] = useState('');
   
-  // View Mode: 'graph' | 'map'
-  const [viewMode, setViewMode] = useState<'graph' | 'map'>('graph');
+  // View Mode: 'graph' | 'map' | 'visual'
+  const [viewMode, setViewMode] = useState<'graph' | 'map' | 'visual'>('graph');
   const [selectedRoute, setSelectedRoute] = useState<any | null>(null);
 
   // Interactive Metric Toggle (Oben Links)
@@ -105,9 +106,35 @@ export default function App() {
   const [focusedEntity, setFocusedEntity] = useState<{ type: 'actor' | 'depot'; name: string } | null>(null);
   const [focusedSummary, setFocusedSummary] = useState<any | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [sidebarTab, setSidebarTab] = useState<'actors' | 'depots' | 'gaps'>('actors');
+  const [sidebarTab, setSidebarTab] = useState<'actors' | 'depots' | 'gaps' | 'pois'>('actors');
   const [sidebarSearch, setSidebarSearch] = useState('');
   const [exclusiveCypherMode, setExclusiveCypherMode] = useState(false);
+
+  // Researcher Case Watchlist (Pinned POIs / Leitobjekte)
+  const [pinnedPois, setPinnedPois] = useState<Array<{ id: string; label: string; desc: string }>>(() => {
+    try {
+      const raw = localStorage.getItem('echo_pinned_pois');
+      if (raw) return JSON.parse(raw);
+    } catch (_e) {}
+    return [
+      { id: 'Ngonnso (Ahnenfigur der Nso)', label: 'Ngonnso (Ahnenfigur der Nso)', desc: 'Sakrale weibliche Ahnenfigur der Nso' },
+      { id: 'Mandu Yenu (Königsthron)', label: 'Mandu Yenu (Königsthron)', desc: 'Perlenbesetzter Königsthron von Bamum' },
+      { id: 'III C 15017', label: 'III C 15017', desc: 'Schlitztrommel aus Banssa / Bafut (1902)' }
+    ];
+  });
+
+  const togglePinPoi = useCallback((nodeObj: { id: string; label?: string; desc?: string }) => {
+    setPinnedPois(prev => {
+      const exists = prev.some(p => p.id === nodeObj.id);
+      const next = exists
+        ? prev.filter(p => p.id !== nodeObj.id)
+        : [{ id: nodeObj.id, label: nodeObj.label || nodeObj.id, desc: nodeObj.desc || 'Fokus-Leitobjekt' }, ...prev];
+      try {
+        localStorage.setItem('echo_pinned_pois', JSON.stringify(next));
+      } catch (_e) {}
+      return next;
+    });
+  }, []);
 
   // User Annotations State (Marianne / Richard Kuration)
   const [annotations, setAnnotations] = useState<any[]>([]);
@@ -146,7 +173,7 @@ export default function App() {
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        localStorage.setItem('echo_researcher_token', loginPassword);
+        localStorage.setItem('echo_researcher_token', data.token || loginPassword);
         setIsResearcher(true);
         setShowLoginModal(false);
         setLoginPassword('');
@@ -172,14 +199,16 @@ export default function App() {
       .then(data => {
         if (data.success && data.publications) {
           setPublications(data.publications);
-          if (selectedPubs.size === 0) {
-            const allIds = new Set<string>(data.publications.map((p: any) => p.id));
-            setSelectedPubs(allIds);
-          }
+          setSelectedPubs(prev => {
+            if (prev.size === 0) {
+              return new Set<string>(data.publications.map((p: any) => p.id));
+            }
+            return prev;
+          });
         }
       })
       .catch(err => console.error("Fehler beim Laden der Publikationen:", err));
-  }, [selectedPubs]);
+  }, []);
 
   // 1.1 Entitaeten fuer Schnellfilter laden
   const loadFilterEntities = useCallback(() => {
@@ -275,6 +304,21 @@ export default function App() {
           } catch (e) {}
 
           setGraphData({ nodes: rawNodes, links: rawLinks });
+          setTimeout(() => {
+            if (fgRef.current) {
+              try {
+                fgRef.current.d3Force('charge')?.strength((n: any) =>
+                  n.type === 'Institution' ? -1400 : (n.type === 'Akteur' ? -650 : -90)
+                );
+                fgRef.current.d3Force('link')?.distance((l: any) =>
+                  l.type === 'LAGERT_IN' ? 180 : 140
+                );
+                if (!focusedEntity) {
+                  fgRef.current.zoomToFit(650, 48);
+                }
+              } catch (_fe) {}
+            }
+          }, 120);
         } else {
           setError("Fehler beim Laden des Beweisgraphen.");
         }
@@ -442,6 +486,21 @@ export default function App() {
 
     loadPublications();
     loadFilterEntities();
+
+    const storedToken = localStorage.getItem('echo_researcher_token');
+    if (storedToken) {
+      fetch('/api/auth/session', { headers: { 'X-Researcher-Key': storedToken } })
+        .then(r => r.json())
+        .then(s => {
+          if (!s.authenticated) {
+            localStorage.removeItem('echo_researcher_token');
+            setIsResearcher(false);
+          } else {
+            setIsResearcher(true);
+          }
+        })
+        .catch(() => {});
+    }
   }, [loadPublications, loadFilterEntities]);
 
   useEffect(() => {
@@ -488,7 +547,7 @@ export default function App() {
   };
 
   // 4.01 Batch Dossier ZIP Handler
-  const handleBatchDossier = (entityType: 'actor' | 'institution' | 'gaps', entityName: string) => {
+  const handleBatchDossier = (entityType: 'actor' | 'institution' | 'gaps' | 'list', entityName: string, explicitInvs?: string[]) => {
     setIsGeneratingBatch(true);
     setBatchStatus(`[START: BÜNDLE DOSSIERS FÜR ${entityName.toUpperCase()}...]`);
 
@@ -498,7 +557,8 @@ export default function App() {
       body: JSON.stringify({
         entity_type: entityType,
         entity_name: entityName,
-        limit: 300
+        limit: 300,
+        inventarnummern: explicitInvs || null
       })
     })
       .then(res => {
@@ -830,9 +890,9 @@ export default function App() {
   }, [getAuthHeaders]);
 
   const handleResetLayout = () => {
-    if (!window.confirm("Starres Layout aufheben und Physik neu berechnen?")) return;
+    if (!window.confirm("Manuelle Knoten-Verschiebungen zuruecksetzen und geordnetes Konstellations-Layout wiederherstellen?")) return;
+    localStorage.removeItem('echo_guest_layout');
     if (!localStorage.getItem('echo_researcher_token')) {
-      localStorage.removeItem('echo_guest_layout');
       window.location.reload();
       return;
     }
@@ -1025,7 +1085,7 @@ export default function App() {
       const tagList = annTags.split(',').map(t => t.trim()).filter(t => t.length > 0);
       const res = await fetch(`/api/objects/${encodeURIComponent(selectedNode.id)}/annotations`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({
           author: annAuthor,
           role: annRole,
@@ -1034,6 +1094,11 @@ export default function App() {
           confidence: annConfidence
         })
       });
+      if (res.status === 401) {
+        setShowLoginModal(true);
+        setLoginError('Forscher-Autorisierung erforderlich.');
+        return;
+      }
       const data = await res.json();
       if (data.success) {
         const newAnn = {
@@ -1092,7 +1157,8 @@ export default function App() {
       (selectedLink.source.id || selectedLink.source) === node.id || 
       (selectedLink.target.id || selectedLink.target) === node.id
     );
-    const matchesSearch = searchTerm && node.label.toLowerCase().includes(searchTerm.toLowerCase());
+    const qLower = searchTerm ? searchTerm.toLowerCase() : '';
+    const matchesSearch = Boolean(qLower && ((node.label && node.label.toLowerCase().includes(qLower)) || (node.desc && node.desc.toLowerCase().includes(qLower))));
 
     // Basis-Farben
     let color = '#475569'; // Standard: Subjekt (Dunkelschiefer)
@@ -1410,7 +1476,7 @@ export default function App() {
         <input
           ref={fileInputRef}
           type="file"
-          accept=".pdf,.xlsx,.xls,.txt,.csv"
+          accept=".pdf,.xlsx,.xls,.csv,.txt"
           onChange={handleFileUpload}
           style={{ display: 'none' }}
         />
@@ -1460,6 +1526,7 @@ export default function App() {
                     backgroundColor: viewMode === 'map' ? '#DC2626' : '#FFFFFF',
                     color: viewMode === 'map' ? '#FFFFFF' : '#DC2626',
                     border: 'none',
+                    borderRight: '1px solid #000000',
                     fontSize: '9px',
                     fontWeight: 900,
                     cursor: 'pointer',
@@ -1467,6 +1534,21 @@ export default function App() {
                   }}
                 >
                   [GEO-KARTE (RESTITUTION)]
+                </button>
+                <button
+                  onClick={() => setViewMode('visual')}
+                  style={{
+                    padding: '4px 9px',
+                    backgroundColor: viewMode === 'visual' ? '#0F766E' : '#FFFFFF',
+                    color: viewMode === 'visual' ? '#FFFFFF' : '#0F766E',
+                    border: 'none',
+                    fontSize: '9px',
+                    fontWeight: 900,
+                    cursor: 'pointer',
+                    letterSpacing: '0.5px'
+                  }}
+                >
+                  [BILD-FORENSIK (FOTO-KETTE)]
                 </button>
               </div>
             </div>
@@ -1911,12 +1993,27 @@ export default function App() {
                     backgroundColor: viewMode === 'map' ? '#DC2626' : '#FFFFFF',
                     color: viewMode === 'map' ? '#FFFFFF' : '#DC2626',
                     border: 'none',
+                    borderRight: '1px solid #000000',
                     fontSize: '8px',
                     fontWeight: 900,
                     cursor: 'pointer'
                   }}
                 >
                   MAP
+                </button>
+                <button
+                  onClick={() => setViewMode('visual')}
+                  style={{
+                    padding: '3px 7px',
+                    backgroundColor: viewMode === 'visual' ? '#0F766E' : '#FFFFFF',
+                    color: viewMode === 'visual' ? '#FFFFFF' : '#0F766E',
+                    border: 'none',
+                    fontSize: '8px',
+                    fontWeight: 900,
+                    cursor: 'pointer'
+                  }}
+                >
+                  FOTO
                 </button>
               </div>
 
@@ -2391,10 +2488,26 @@ export default function App() {
                     backgroundColor: sidebarTab === 'gaps' ? '#7C3AED' : '#FFFFFF',
                     color: sidebarTab === 'gaps' ? '#FFFFFF' : '#7C3AED',
                     border: 'none',
+                    borderRight: '1px solid #000000',
                     cursor: 'pointer'
                   }}
                 >
                   LÜCKEN ({gapItems.length || stats.provenienz_luecken})
+                </button>
+                <button
+                  onClick={() => setSidebarTab('pois')}
+                  style={{
+                    flex: 1,
+                    padding: '7px 4px',
+                    fontSize: '8px',
+                    fontWeight: 900,
+                    backgroundColor: sidebarTab === 'pois' ? '#0F766E' : '#FFFFFF',
+                    color: sidebarTab === 'pois' ? '#FFFFFF' : '#0F766E',
+                    border: 'none',
+                    cursor: 'pointer'
+                  }}
+                >
+                  POIs ({pinnedPois.length})
                 </button>
               </div>
 
@@ -2626,6 +2739,59 @@ export default function App() {
                     })}
                   </div>
                 )}
+
+                {sidebarTab === 'pois' && (
+                  <div style={{ display: 'flex', flexDirection: 'column' }}>
+                    <div style={{ padding: '6px 10px', backgroundColor: '#F0FDFA', borderBottom: '1px solid #0F766E', fontSize: '8px', color: '#115E59', fontWeight: 'bold' }}>
+                      GEMERKTE LEITOBJEKTE (FALLAKTE FUER GEZIELTE RESTITUTION)
+                    </div>
+                    {pinnedPois.length === 0 && (
+                      <div style={{ padding: '16px 12px', fontSize: '8.5px', color: '#64748B', textAlign: 'center' }}>
+                        Keine Leitobjekte gepinnt. Waehle ein Subjekt im Graphen und klicke rechts auf [+ IN FALLAKTE MERKEN].
+                      </div>
+                    )}
+                    {pinnedPois.map((poi) => {
+                      const isSel = selectedNode && selectedNode.id === poi.id;
+                      return (
+                        <div
+                          key={poi.id}
+                          onClick={() => {
+                            const node = graphData.nodes.find((n: any) => n.id === poi.id || n.label === poi.label);
+                            if (node) {
+                              setViewMode('graph');
+                              setSelectedLink(null);
+                              setSelectedNode(node);
+                              if (fgRef.current && node.x !== undefined) {
+                                fgRef.current.centerAt(node.x, node.y, 700);
+                                fgRef.current.zoom(2.8, 700);
+                              }
+                            } else {
+                              setSelectedNode({ id: poi.id, label: poi.label, type: 'Subjekt', desc: poi.desc });
+                            }
+                          }}
+                          style={{
+                            padding: '8px 12px',
+                            borderBottom: '1px solid #E2E8F0',
+                            backgroundColor: isSel ? '#F0FDFA' : '#FFFFFF',
+                            borderLeft: isSel ? '4px solid #0F766E' : '4px solid transparent',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <span style={{ fontWeight: 900, fontSize: '9.5px', color: '#0F766E' }}>{poi.label}</span>
+                            <button
+                              onClick={(ev) => { ev.stopPropagation(); togglePinPoi(poi); }}
+                              style={{ border: '1px solid #000', backgroundColor: '#FFF', fontSize: '7.5px', fontWeight: 'bold', cursor: 'pointer', padding: '0 4px' }}
+                            >
+                              [X]
+                            </button>
+                          </div>
+                          <div style={{ fontSize: '8px', color: '#334155', marginTop: '2px' }}>{poi.desc}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
 
             </div>
@@ -2689,7 +2855,7 @@ export default function App() {
               d3AlphaDecay={0.02}
               d3VelocityDecay={0.3}
             />
-          ) : (
+          ) : viewMode === 'map' ? (
             <GeodataMap
               activeMetricFilter={activeMetricFilter}
               searchTerm={searchTerm}
@@ -2710,6 +2876,17 @@ export default function App() {
                 setSelectedRoute(route);
               }}
               selectedRouteId={selectedRoute?.id}
+            />
+          ) : (
+            <VisualForensicsView
+              isResearcher={isResearcher}
+              getAuthHeaders={getAuthHeaders}
+              onRequestLogin={() => { setShowLoginModal(true); setLoginError('Forscher-Autorisierung erforderlich.'); }}
+              onChainCommitted={() => {
+                loadPublications();
+                loadFilterEntities();
+                loadGraph();
+              }}
             />
           )}
 
@@ -3314,9 +3491,24 @@ export default function App() {
                   </div>
                 )}
 
-                {/* Subjekt Actions: Single Dossier */}
+                {/* Subjekt Actions: POI Watchlist + Single Dossier */}
                 {(selectedNodeDetails && (selectedNodeDetails.type === 'Subjekt' || selectedNodeDetails.type === 'Objekt')) && (
-                  <div style={{ borderTop: '2px solid #000000', paddingTop: '14px' }}>
+                  <div style={{ borderTop: '2px solid #000000', paddingTop: '14px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <button
+                      onClick={() => togglePinPoi({ id: selectedNodeDetails.id, label: selectedNodeDetails.label, desc: selectedNodeDetails.desc })}
+                      style={{
+                        width: '100%',
+                        padding: '8px 10px',
+                        backgroundColor: pinnedPois.some(p => p.id === selectedNodeDetails.id) ? '#0F766E' : '#FFFFFF',
+                        color: pinnedPois.some(p => p.id === selectedNodeDetails.id) ? '#FFFFFF' : '#0F766E',
+                        border: '2px solid #0F766E',
+                        fontWeight: 900,
+                        fontSize: '9.5px',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      {pinnedPois.some(p => p.id === selectedNodeDetails.id) ? '[AUS FALLAKTE (POI) ENTFERNEN]' : '[+ ALS LEITOBJEKT IN FALLAKTE MERKEN]'}
+                    </button>
                     <button
                       onClick={() => handlePrintDossier(selectedNodeDetails.id)}
                       disabled={isGeneratingDossier}
@@ -3800,7 +3992,7 @@ export default function App() {
 
                 {/* Batch Export Button */}
                 <button
-                  onClick={() => handleBatchDossier('actor', selectedRoute.actors[0] || selectedRoute.origin_name)}
+                  onClick={() => handleBatchDossier('list', selectedRoute.origin_name, (selectedRoute.objects || []).map((o: any) => o.inv || o.id).filter(Boolean))}
                   disabled={isGeneratingBatch}
                   style={{
                     width: '100%',

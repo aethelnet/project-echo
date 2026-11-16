@@ -15,8 +15,7 @@ from typing import Dict, Any, List, Optional
 try:
     from neo4j import GraphDatabase
 except ImportError:
-    print("[-] neo4j Driver nicht installiert!")
-    sys.exit(1)
+    GraphDatabase = None
 
 try:
     from reportlab.lib.pagesizes import A4
@@ -27,9 +26,10 @@ try:
         SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, KeepTogether, HRFlowable
     )
     from reportlab.pdfgen import canvas
+    _HAS_REPORTLAB = True
 except ImportError:
-    print("[-] reportlab nicht installiert! Bitte 'pip install reportlab' ausfuehren.")
-    sys.exit(1)
+    _HAS_REPORTLAB = False
+    canvas = None
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ATLAS_TXT_PATH = os.getenv("ATLAS_TXT_PATH", os.path.join(BASE_DIR, "shadow-museum-atlas/data_dropzone/verified_research/atlas_der_abwesenheit.txt"))
@@ -38,7 +38,7 @@ NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
 # ==========================================================
 # 1. NUMBERED CANVAS FUER HEADER & FOOTER
 # ==========================================================
-class NumberedCanvas(canvas.Canvas):
+class NumberedCanvas(canvas.Canvas if _HAS_REPORTLAB else object):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._saved_page_states = []
@@ -123,66 +123,76 @@ def extract_primary_text_excerpt(page_num: int, inv_num: str, actor_name: Option
 # 3. NEO4J PROVENIENZ-ABFRAGE
 # ==========================================================
 def query_object_provenance(inv_number: str) -> Optional[Dict[str, Any]]:
-    """Fragt den exakten forensischen Pfad eines Objekts in Neo4j ab."""
-    driver = GraphDatabase.driver(NEO4J_URI, auth=None)
-    with driver.session() as s:
-        # 1. Objekt-Stammdaten & Verbindungen
-        cypher = """
-        MATCH (o:Objekt)
-        WHERE toLower(o.inventarnummer) = toLower($inv)
-           OR o.inventarnummer CONTAINS $inv
-        OPTIONAL MATCH (a:Akteur)-[r_akt]->(o)
-        OPTIONAL MATCH (o)-[r_dep:LAGERT_IN]->(i:Institution)
-        OPTIONAL MATCH (a)-[r_trans]->(i)
-        RETURN o.inventarnummer AS inv,
-               o.bezeichnung AS bez,
-               collect(DISTINCT {
-                   name: a.name,
-                   rolle: a.rolle,
-                   lebensdaten: a.lebensdaten,
-                   aktion: type(r_akt),
-                   jahr: r_akt.jahr,
-                   beleg: r_akt.beleg
-               }) AS akteure,
-               collect(DISTINCT {
-                   name: i.name,
-                   stadt: i.stadt,
-                   status: r_dep.status,
-                   beleg: r_dep.beleg
-               }) AS institutionen,
-               collect(DISTINCT {
-                   akteur: a.name,
-                   institution: i.name,
-                   transfer_art: type(r_trans),
-                   beleg: r_trans.beleg
-               }) AS transfers
-        LIMIT 1
-        """
-        result = s.run(cypher, {"inv": inv_number}).single()
-        driver.close()
+    """Fragt den exakten forensischen Pfad eines Objekts in Neo4j (oder Embedded Seed Store) ab."""
+    if GraphDatabase is not None:
+        try:
+            driver = GraphDatabase.driver(NEO4J_URI, auth=None, connection_timeout=0.5)
+            with driver.session() as s:
+                cypher = """
+                MATCH (o:Objekt)
+                WHERE toLower(o.inventarnummer) = toLower($inv)
+                   OR o.inventarnummer CONTAINS $inv
+                OPTIONAL MATCH (a:Akteur)-[r_akt]->(o)
+                OPTIONAL MATCH (o)-[r_dep:LAGERT_IN]->(i:Institution)
+                OPTIONAL MATCH (a)-[r_trans]->(i)
+                RETURN o.inventarnummer AS inv,
+                       o.bezeichnung AS bez,
+                       collect(DISTINCT {
+                           name: a.name,
+                           rolle: a.rolle,
+                           lebensdaten: a.lebensdaten,
+                           aktion: type(r_akt),
+                           jahr: r_akt.jahr,
+                           beleg: r_akt.beleg
+                       }) AS akteure,
+                       collect(DISTINCT {
+                           name: i.name,
+                           stadt: i.stadt,
+                           status: r_dep.status,
+                           beleg: r_dep.beleg
+                       }) AS institutionen,
+                       collect(DISTINCT {
+                           akteur: a.name,
+                           institution: i.name,
+                           transfer_art: type(r_trans),
+                           beleg: r_trans.beleg
+                       }) AS transfers
+                LIMIT 1
+                """
+                result = s.run(cypher, {"inv": inv_number}).single()
+            driver.close()
+            if result and result["inv"]:
+                akteure = [a for a in result["akteure"] if a.get("name")]
+                institutionen = [i for i in result["institutionen"] if i.get("name")]
+                transfers = [t for t in result["transfers"] if t.get("akteur") and t.get("institution") and t.get("transfer_art")]
+                return {
+                    "inventarnummer": result["inv"],
+                    "bezeichnung": result["bez"] or "Koloniales Kulturgut",
+                    "akteure": akteure,
+                    "institutionen": institutionen,
+                    "transfers": transfers,
+                }
+        except Exception:
+            pass
 
-        if not result or not result["inv"]:
-            return None
-
-        # Saeubere leere Dicts aus collect
-        akteure = [a for a in result["akteure"] if a.get("name")]
-        institutionen = [i for i in result["institutionen"] if i.get("name")]
-        transfers = [t for t in result["transfers"] if t.get("akteur") and t.get("institution") and t.get("transfer_art")]
-
-        return {
-            "inventarnummer": result["inv"],
-            "bezeichnung": result["bez"] or "Koloniales Kulturgut",
-            "akteure": akteure,
-            "institutionen": institutionen,
-            "transfers": transfers
-        }
+    from backend.embedded_graph import EMBEDDED_STORE
+    return EMBEDDED_STORE.query_object_provenance(inv_number)
 
 # ==========================================================
 # 4. DOSSIER PDF GENERIERUNG (REPORTLAB)
 # ==========================================================
 def generate_pdf_dossier(data: Dict[str, Any], output_path: str) -> str:
-    """Baut das formelle Restitutionsdossier als druckreife DIN A4 PDF."""
+    """Baut das formelle Restitutionsdossier als druckreife DIN A4 PDF (ReportLab oder PyMuPDF)."""
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+    if not _HAS_REPORTLAB:
+        from backend.pdf_forensics import render_object_dossier_fitz
+        excerpt = None
+        for akt in data.get("akteure") or []:
+            m = re.search(r"S\.\s*(\d+)", str(akt.get("beleg") or ""))
+            if m:
+                excerpt = extract_primary_text_excerpt(int(m.group(1)), str(data.get("inventarnummer") or ""), akt.get("name"))
+                break
+        return render_object_dossier_fitz(data, output_path, primary_excerpt=excerpt)
 
     doc = SimpleDocTemplate(
         output_path,
@@ -548,7 +558,7 @@ def main():
     out_file = args.output or os.path.join(out_dir, f"Restitutionsdossier_{clean_filename}.pdf")
 
     pdf_path = generate_pdf_dossier(data, out_file)
-    print(f"🚀 Restitutions-Dossier erfolgreich erstellt!")
+    print("[+] Restitutions-Dossier erfolgreich erstellt!")
     print(f"    - Datei: {pdf_path}")
     print(f"    - Dateigröße: {os.path.getsize(pdf_path)} Bytes")
 
