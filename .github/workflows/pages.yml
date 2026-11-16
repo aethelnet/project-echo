@@ -33,20 +33,11 @@ jobs:
 
       - name: Install lightweight forensic export dependencies
         run: |
-          pip install --no-cache-dir fastapi uvicorn pydantic python-multipart PyMuPDF opencv-python-headless numpy Pillow
+          pip install --no-cache-dir fastapi uvicorn httpx pydantic python-multipart PyMuPDF scipy numpy Pillow
 
       - name: Export real Provenance Snapshot, Visual RANSAC Benchmark & Flagship PDFs
         run: |
-          python3 serve_graph_api.py &
-          API_PID=$!
-          for i in $(seq 1 30); do
-            if curl -sf http://127.0.0.1:8088/api/stats > /dev/null; then
-              break
-            fi
-            sleep 0.5
-          done
           python3 scripts/export_static_snapshot.py
-          kill $API_PID || true
 
       - name: Build Shadow Museum Atlas frontend
         working-directory: shadow-museum-atlas

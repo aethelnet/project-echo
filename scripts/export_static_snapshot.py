@@ -1,43 +1,45 @@
 #!/usr/bin/env python3
 """
 Export real Project Echo v2.3 API responses & flagship court-ready PDF/ZIP artifacts
-into shadow-museum-atlas/public/static_snapshot/ so GitHub Pages (echo.aethelburg.network)
-functions 100% serverlessly in the browser when no FastAPI backend is reachable.
+in-process via FastAPI TestClient into shadow-museum-atlas/public/static_snapshot/
+so GitHub Pages (echo.aethelburg.network) runs 100% serverlessly in the browser.
 """
 import json
 import os
 import shutil
+import sys
 import time
 import urllib.parse
-import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+os.environ["ECHO_FORCE_EMBEDDED"] = "1"
+
+from fastapi.testclient import TestClient
+from serve_graph_api import app
+
 OUT_DIR = ROOT / "shadow-museum-atlas" / "public" / "static_snapshot"
 DOSSIERS_DIR = OUT_DIR / "dossiers"
-BASE_URL = os.environ.get("ECHO_EXPORT_API", "http://127.0.0.1:8088")
-
-
-def get_json(path: str):
-    with urllib.request.urlopen(f"{BASE_URL}{path}", timeout=30) as resp:
-        return json.loads(resp.read().decode("utf-8"))
-
-
-def post_json(path: str, payload: dict):
-    data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        f"{BASE_URL}{path}",
-        data=data,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=60) as resp:
-        return json.loads(resp.read().decode("utf-8"))
 
 
 def main():
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     DOSSIERS_DIR.mkdir(parents=True, exist_ok=True)
+
+    client = TestClient(app)
+
+    def get_json(path: str):
+        r = client.get(path)
+        r.raise_for_status()
+        return r.json()
+
+    def post_json(path: str, payload: dict):
+        r = client.post(path, json=payload)
+        r.raise_for_status()
+        return r.json()
 
     publications = get_json("/api/publications")
     filters_entities = get_json("/api/filters/entities")
@@ -79,48 +81,40 @@ def main():
                 institution_summaries[lbl] = res
                 institution_summaries[lbl.lower()] = res
 
-    # Export flagship PDF dossiers & HLKO diplomatic ZIP
     flagship_invs = ["AS 1574", "033513", "C 20681", "InvNr. 7087"]
     exported_dossiers = {}
     for inv in flagship_invs:
-        try:
-            dres = post_json("/api/dossier/generate", {"inventarnummer": inv})
-            if dres.get("success") and dres.get("filename"):
-                fname = dres["filename"]
-                src_pdf = ROOT / "dossiers" / fname
-                if src_pdf.exists():
-                    shutil.copy2(src_pdf, DOSSIERS_DIR / fname)
-                    exported_dossiers[inv] = f"./static_snapshot/dossiers/{fname}"
-        except Exception as exc:
-            print(f"[WARN] Could not export flagship dossier {inv}: {exc}")
+        dres = post_json("/api/dossier/generate", {"inventarnummer": inv})
+        if dres.get("success") and dres.get("filename"):
+            fname = dres["filename"]
+            src_pdf = ROOT / "dossiers" / fname
+            if src_pdf.exists():
+                shutil.copy2(src_pdf, DOSSIERS_DIR / fname)
+                exported_dossiers[inv] = f"./static_snapshot/dossiers/{fname}"
 
-    # Export one real HLKO Diplomatic Restitution Package ZIP
     exported_petition_zip = None
-    try:
-        pres = post_json(
-            "/api/petition/generate_llm",
-            {"institution": "Ethnologisches Museum Berlin", "community": None},
-        )
-        job_id = pres.get("job_id")
-        if job_id:
-            for _ in range(30):
-                sres = get_json(f"/api/petition/status/{job_id}")
-                if sres.get("status") == "completed":
-                    zname = sres.get("result", {}).get("zip_filename")
-                    if zname:
-                        src_zip = ROOT / "dossiers" / zname
-                        if src_zip.exists():
-                            target_name = "HLKO_Restitutionspaket_Ethnologisches_Museum_Berlin.zip"
-                            shutil.copy2(src_zip, DOSSIERS_DIR / target_name)
-                            exported_petition_zip = {
-                                "zip_filename": target_name,
-                                "download_zip_url": f"./static_snapshot/dossiers/{target_name}",
-                                "counts": sres.get("result", {}).get("counts", {"total_extracted": 320}),
-                            }
-                    break
-                time.sleep(0.25)
-    except Exception as exc:
-        print(f"[WARN] Could not export flagship HLKO zip: {exc}")
+    pres = post_json(
+        "/api/petition/generate_llm",
+        {"institution": "Ethnologisches Museum Berlin", "community": None},
+    )
+    job_id = pres.get("job_id")
+    if job_id:
+        for _ in range(30):
+            sres = get_json(f"/api/petition/status/{job_id}")
+            if sres.get("status") == "completed":
+                zname = sres.get("result", {}).get("zip_filename")
+                if zname:
+                    src_zip = ROOT / "dossiers" / zname
+                    if src_zip.exists():
+                        target_name = "HLKO_Restitutionspaket_Ethnologisches_Museum_Berlin.zip"
+                        shutil.copy2(src_zip, DOSSIERS_DIR / target_name)
+                        exported_petition_zip = {
+                            "zip_filename": target_name,
+                            "download_zip_url": f"./static_snapshot/dossiers/{target_name}",
+                            "counts": sres.get("result", {}).get("counts", {"total_extracted": 320}),
+                        }
+                break
+            time.sleep(0.1)
 
     bundle = {
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -142,7 +136,6 @@ def main():
     bundle_path = OUT_DIR / "bundle.json"
     bundle_path.write_text(json.dumps(bundle, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
 
-    # Export Visual Photo-Chain Re-ID benchmark (RootSIFT-128D + 6-DOF Affine RANSAC)
     visual_demo = get_json("/api/visual/demo_case")
     visual_path = OUT_DIR / "visual_demo.json"
     visual_path.write_text(json.dumps(visual_demo, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
