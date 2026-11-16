@@ -22,9 +22,20 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 from PIL import Image, ImageDraw
 from scipy import ndimage
-import torch
 
-from backend.echo_lgnn_tensor import binary_shannon_entropy
+try:
+    import torch
+    from backend.echo_lgnn_tensor import binary_shannon_entropy as _tensor_entropy
+except ImportError:
+    torch = None
+    _tensor_entropy = None
+
+
+def _scalar_shannon_entropy(p: float) -> float:
+    p_clamped = max(1e-6, min(1.0 - 1e-6, float(p)))
+    if torch is not None and _tensor_entropy is not None:
+        return float(_tensor_entropy(torch.tensor([p_clamped])).item())
+    return float(-(p_clamped * math.log2(p_clamped) + (1.0 - p_clamped) * math.log2(1.0 - p_clamped)))
 
 WORK_SIZE = 384
 
@@ -167,7 +178,7 @@ def match_descriptors_and_ransac_affine(
             "matches": [],
             "verdict": "INSUFFICIENT_FEATURES",
             "confidence": 0.05,
-            "shannon_entropy": float(binary_shannon_entropy(torch.tensor([0.05])).item()),
+            "shannon_entropy": _scalar_shannon_entropy(0.05),
         }
 
     # Cosine similarity auf L2-normierten RootSIFT-Vektoren -> euklidische Distanz
@@ -195,7 +206,7 @@ def match_descriptors_and_ransac_affine(
             "matches": [],
             "verdict": "KEINE_GEOMETRISCHE_KONSISTENZ",
             "confidence": conf,
-            "shannon_entropy": round(float(binary_shannon_entropy(torch.tensor([conf])).item()), 4),
+            "shannon_entropy": round(_scalar_shannon_entropy(conf), 4),
         }
 
     pts1 = np.array([[kps1[i, 0], kps1[i, 1]] for i, _, _ in putative], dtype=np.float64)
@@ -261,7 +272,7 @@ def match_descriptors_and_ransac_affine(
         raw_conf = max(0.04, min(0.28, 0.04 * inlier_count))
         verdict = "ABGELEHNT_KEINE_INDIVIDUELLE_UEBEREINSTIMMUNG"
 
-    entropy = float(binary_shannon_entropy(torch.tensor([raw_conf])).item())
+    entropy = _scalar_shannon_entropy(raw_conf)
 
     match_records = []
     for k_idx, (i, j, sim_val) in enumerate(putative):
