@@ -1,8 +1,11 @@
 # Project Echo // Shadow Museum Provenance Atlas
 
+[![Live Demo](https://img.shields.io/badge/Live_Demo-echo.aethelburg.network-16a34a.svg)](https://echo.aethelburg.network)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPLv3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![Architecture](https://img.shields.io/badge/Engine-FastAPI%20%2B%20Embedded%20Graph%20%7C%20Neo4j-black)](#)
 [![Legal Basis](https://img.shields.io/badge/Forensics-HLKO%20Art.%2056%20%7C%20Washington%20Principles-991b1b)](#)
+
+> **Serverless Live-Demo (sofort im Browser ohne Login/Installation):** **[https://echo.aethelburg.network](https://echo.aethelburg.network)**
 
 **Project Echo (`Shadow Museum Provenance Atlas`)** ist eine forensische Graph- und Geodaten-Forschungsumgebung zur Rekonstruktion kolonialer Provenienz-Netzwerke (Kamerun 1884–1916), zur Aufdeckung musealer Narrativ-Kollisionen (*"Schenkung"* vs. *Militärischer Raubzug*) und zur automatisierten Erstellung gerichtsverwertbarer PDF-Restitutionsdossiers.
 
