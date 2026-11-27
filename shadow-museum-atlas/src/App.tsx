@@ -24,9 +24,19 @@ export default function App() {
   // Inspector & Selection States
   const [selectedNode, setSelectedNode] = useState<any>(null);
   const [selectedLink, setSelectedLink] = useState<any>(null);
-  const hoveredLinkRef = useRef<any>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const deferredSearchTerm = useDeferredValue(searchTerm);
+  const [pinnedNodeIds, setPinnedNodeIds] = useState<Set<string>>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('echo_guest_layout') || '{}');
+      return new Set(Object.keys(saved));
+    } catch (_e) {
+      return new Set();
+    }
+  });
+  const [simCooldown, setSimCooldown] = useState<number>(0);
+  const simActiveRef = useRef<boolean>(false);
+  const lastDragReheatRef = useRef<number>(0);
   
   // View Mode: 'graph' | 'map' | 'visual' | 'docs'
   const [viewMode, setViewMode] = useState<'graph' | 'map' | 'visual' | 'docs'>('graph');
@@ -356,36 +366,60 @@ export default function App() {
           rawLinks.sort((a: any, b: any) => (typePriority[a.type] ?? 2) - (typePriority[b.type] ?? 2));
 
           const rawNodes = data.nodes || [];
+          const nextPinned = new Set<string>();
+          let guestLayout: Record<string, any> = {};
           try {
-            const guestLayout = JSON.parse(localStorage.getItem('echo_guest_layout') || '{}');
-            rawNodes.forEach((n: any) => {
-              n._labelLower = n.label ? String(n.label).toLowerCase() : '';
-              n._descLower = n.desc ? String(n.desc).toLowerCase() : '';
-              const coords = guestLayout[n.id] || guestLayout[n.name];
-              if (coords && typeof coords.x === 'number' && typeof coords.y === 'number') {
-                n.fx = coords.x;
-                n.fy = coords.y;
-              }
-            });
-          } catch (e) {
-            rawNodes.forEach((n: any) => {
-              n._labelLower = n.label ? String(n.label).toLowerCase() : '';
-              n._descLower = n.desc ? String(n.desc).toLowerCase() : '';
-            });
-          }
+            guestLayout = JSON.parse(localStorage.getItem('echo_guest_layout') || '{}');
+          } catch (_e) {}
+
+          rawNodes.forEach((n: any) => {
+            n._labelLower = n.label ? String(n.label).toLowerCase() : '';
+            n._descLower = n.desc ? String(n.desc).toLowerCase() : '';
+            n._homeX = typeof n.x === 'number' ? n.x : 0;
+            n._homeY = typeof n.y === 'number' ? n.y : 0;
+            const coords = guestLayout[n.id] || guestLayout[n.name];
+            if (coords && typeof coords.x === 'number' && typeof coords.y === 'number') {
+              n._pinned = true;
+              n.x = coords.x;
+              n.y = coords.y;
+              n.fx = coords.x;
+              n.fy = coords.y;
+              nextPinned.add(n.id);
+            } else {
+              // Only manually dragged nodes are pinned; all others stay free to arrange around them
+              n._pinned = false;
+              n.fx = undefined;
+              n.fy = undefined;
+            }
+          });
+          setPinnedNodeIds(nextPinned);
+          simActiveRef.current = nextPinned.size > 0;
+          setSimCooldown(nextPinned.size > 0 ? 55 : 0);
 
           setGraphData({ nodes: rawNodes, links: rawLinks });
           setTimeout(() => {
             if (fgRef.current) {
               try {
                 fgRef.current.d3Force('charge')?.strength((n: any) =>
-                  n.type === 'Institution' ? -1400 : (n.type === 'Akteur' ? -650 : -90)
+                  n.type === 'Institution' ? -260 : (n.type === 'Akteur' ? -130 : -30)
                 );
                 fgRef.current.d3Force('link')?.distance((l: any) =>
-                  l.type === 'LAGERT_IN' ? 180 : 140
-                );
+                  l.type === 'LAGERT_IN' ? 85 : 68
+                )?.strength(0.42);
+                // Gentle constellation spring keeps disconnected clusters tidy while letting connected neighbors move fluidly around pinned nodes
+                fgRef.current.d3Force('constellation', (alpha: number) => {
+                  const k = 0.025 * alpha;
+                  for (let i = 0; i < rawNodes.length; i++) {
+                    const nd = rawNodes[i];
+                    if (nd._pinned || nd.fx !== undefined) continue;
+                    if (nd._homeX !== undefined && nd.x !== undefined) {
+                      nd.vx = (nd.vx || 0) + (nd._homeX - nd.x) * k;
+                      nd.vy = (nd.vy || 0) + (nd._homeY - nd.y) * k;
+                    }
+                  }
+                });
                 if (!focusedEntity) {
-                  fgRef.current.zoomToFit(650, 48);
+                  fgRef.current.zoomToFit(600, 48);
                 }
               } catch (_fe) {}
             }
@@ -984,66 +1018,159 @@ export default function App() {
 
   // 6. File Upload Handler
   
-  // Layout Functions
+  // Layout & Drag-to-Pin / Unpin Physics Functions
   const handleEngineStop = useCallback(() => {
-    if (!graphData.nodes.length) return;
-    if (graphData.nodes[0].fx !== undefined) return;
-    
-    // Nur autorisierte Forscher überschreiben das Master-Layout
-    if (!localStorage.getItem('echo_researcher_token')) return;
+    // Only manually pinned nodes stay fixed; never freeze unpinned nodes on engine settle.
+  }, []);
 
-    const layout: Record<string, any> = {};
-    graphData.nodes.forEach((n: any) => {
-      layout[n.id || n] = { x: n.x, y: n.y };
-    });
-    
-    fetch('/api/graph/layout', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-      body: JSON.stringify(layout)
-    }).catch(err => console.error(err));
-  }, [graphData, getAuthHeaders]);
+  const persistPinnedNode = useCallback((nodeId: string, x: number, y: number) => {
+    try {
+      const guestLayout = JSON.parse(localStorage.getItem('echo_guest_layout') || '{}');
+      guestLayout[nodeId] = { x, y };
+      localStorage.setItem('echo_guest_layout', JSON.stringify(guestLayout));
+    } catch (_e) {}
 
-  const handleNodeDragEnd = useCallback((node: any) => {
+    if (localStorage.getItem('echo_researcher_token')) {
+      fetch('/api/graph/layout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({ [nodeId]: { x, y } })
+      }).catch(() => {});
+    }
+  }, [getAuthHeaders]);
+
+  const handleNodeDrag = useCallback((node: any) => {
     node.fx = node.x;
     node.fy = node.y;
-
-    if (!localStorage.getItem('echo_researcher_token')) {
-      // Gast-Modus: Isoliert im Browser des Besuchers puffern
-      try {
-        const guestLayout = JSON.parse(localStorage.getItem('echo_guest_layout') || '{}');
-        guestLayout[node.id || node] = { x: node.x, y: node.y };
-        localStorage.setItem('echo_guest_layout', JSON.stringify(guestLayout));
-      } catch (e) {
-        console.error(e);
-      }
-      return;
+    node._pinned = true;
+    if (!simActiveRef.current) {
+      simActiveRef.current = true;
+      setSimCooldown(240);
     }
+    const now = performance.now();
+    if (now - lastDragReheatRef.current > 160) {
+      lastDragReheatRef.current = now;
+      requestAnimationFrame(() => {
+        try {
+          fgRef.current?.d3ReheatSimulation?.();
+        } catch (_e) {}
+      });
+    }
+  }, []);
 
-    // Forscher-Modus: Serverweites Master-Layout synchronisieren
-    const layout = { [node.id || node]: { x: node.x, y: node.y } };
-    fetch('/api/graph/layout', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-      body: JSON.stringify(layout)
-    }).catch(err => console.error(err));
-  }, [getAuthHeaders]);
+  const handleNodeDragEnd = useCallback((node: any) => {
+    const id = node.id || node;
+    node._pinned = true;
+    node.fx = node.x;
+    node.fy = node.y;
+    persistPinnedNode(id, node.x, node.y);
+    setPinnedNodeIds((prev) => {
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
+    simActiveRef.current = true;
+    setSimCooldown(110);
+    requestAnimationFrame(() => {
+      try {
+        fgRef.current?.d3ReheatSimulation?.();
+      } catch (_e) {}
+    });
+  }, [persistPinnedNode]);
+
+  const handlePinNodeAtCurrent = useCallback((node: any) => {
+    if (!node) return;
+    const target = graphData.nodes.find((n: any) => n.id === node.id) || node;
+    target._pinned = true;
+    target.fx = target.x;
+    target.fy = target.y;
+    persistPinnedNode(target.id, target.x, target.y);
+    setPinnedNodeIds((prev) => {
+      const next = new Set(prev);
+      next.add(target.id);
+      return next;
+    });
+  }, [graphData.nodes, persistPinnedNode]);
+
+  const handleUnpinNode = useCallback((node: any) => {
+    if (!node) return;
+    const target = graphData.nodes.find((n: any) => n.id === node.id) || node;
+    if (!target._pinned && target.fx === undefined) return;
+    target._pinned = false;
+    target.fx = undefined;
+    target.fy = undefined;
+    try {
+      const guestLayout = JSON.parse(localStorage.getItem('echo_guest_layout') || '{}');
+      delete guestLayout[target.id];
+      localStorage.setItem('echo_guest_layout', JSON.stringify(guestLayout));
+    } catch (_e) {}
+    setPinnedNodeIds((prev) => {
+      const next = new Set(prev);
+      next.delete(target.id);
+      return next;
+    });
+    simActiveRef.current = true;
+    setSimCooldown(85);
+    setTimeout(() => {
+      try {
+        fgRef.current?.d3ReheatSimulation?.();
+      } catch (_e) {}
+    }, 10);
+  }, [graphData.nodes]);
+
+  const handleUnpinAll = useCallback(() => {
+    graphData.nodes.forEach((n: any) => {
+      n._pinned = false;
+      n.fx = undefined;
+      n.fy = undefined;
+    });
+    localStorage.removeItem('echo_guest_layout');
+    setPinnedNodeIds(new Set());
+    simActiveRef.current = true;
+    setSimCooldown(95);
+    if (localStorage.getItem('echo_researcher_token')) {
+      fetch('/api/graph/layout', {
+        method: 'DELETE',
+        headers: { ...getAuthHeaders() }
+      }).catch(() => {});
+    }
+    setTimeout(() => {
+      try {
+        fgRef.current?.d3ReheatSimulation?.();
+      } catch (_e) {}
+    }, 10);
+  }, [graphData.nodes, getAuthHeaders]);
 
   const handleResetLayout = () => {
     if (!window.confirm(t(
-      'Reset manual node positions and restore ordered constellation layout?',
-      'Manuelle Knoten-Verschiebungen zuruecksetzen und geordnetes Konstellations-Layout wiederherstellen?',
-      'Réinitialiser les positions manuelles des nœuds et restaurer la constellation ordonnée ?'
+      'Unpin all manually moved nodes and restore the original constellation layout?',
+      'Alle manuell gepinnten Knoten lösen und das ursprüngliche Konstellations-Layout wiederherstellen?',
+      'Détacher tous les nœuds épinglés et restaurer la constellation initiale ?'
     ))) return;
+    graphData.nodes.forEach((n: any) => {
+      n._pinned = false;
+      n.fx = undefined;
+      n.fy = undefined;
+      if (n._homeX !== undefined) {
+        n.x = n._homeX;
+        n.y = n._homeY;
+        n.vx = 0;
+        n.vy = 0;
+      }
+    });
     localStorage.removeItem('echo_guest_layout');
-    if (!localStorage.getItem('echo_researcher_token')) {
-      window.location.reload();
-      return;
+    setPinnedNodeIds(new Set());
+    simActiveRef.current = false;
+    setSimCooldown(0);
+    if (localStorage.getItem('echo_researcher_token')) {
+      fetch('/api/graph/layout', { 
+        method: 'DELETE',
+        headers: { ...getAuthHeaders() }
+      }).catch(() => {});
     }
-    fetch('/api/graph/layout', { 
-      method: 'DELETE',
-      headers: { ...getAuthHeaders() }
-    }).then(() => window.location.reload());
+    setTimeout(() => {
+      fgRef.current?.zoomToFit(500, 48);
+    }, 40);
   };
 
   // Edge Functions
@@ -1446,9 +1573,23 @@ export default function App() {
       ctx.fill();
     }
 
+    if (node._pinned) {
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, radius + 3.4, 0, 2 * Math.PI, false);
+      ctx.strokeStyle = '#9A3412';
+      ctx.lineWidth = 1.6;
+      ctx.stroke();
+
+      // Tiny archival pin anchor dot at top-right of pinned node
+      ctx.beginPath();
+      ctx.arc(node.x + radius * 0.78, node.y - radius * 0.78, Math.max(2.1, radius * 0.28), 0, 2 * Math.PI, false);
+      ctx.fillStyle = '#9A3412';
+      ctx.fill();
+    }
+
     if (isSelected || isLinkEndpoint || matchesSearch) {
       ctx.beginPath();
-      ctx.arc(node.x, node.y, radius + 4, 0, 2 * Math.PI, false);
+      ctx.arc(node.x, node.y, radius + 4.5, 0, 2 * Math.PI, false);
       ctx.strokeStyle = '#141413';
       ctx.lineWidth = 2.2;
       ctx.stroke();
@@ -1460,7 +1601,7 @@ export default function App() {
     ctx.fillStyle = color;
     ctx.fill();
 
-    if (node.type !== 'Subjekt' || globalScale >= 1.35 || isSelected || isLinkEndpoint || matchesSearch) {
+    if (node.type !== 'Subjekt' || globalScale >= 1.35 || isSelected || isLinkEndpoint || matchesSearch || node._pinned) {
       ctx.strokeStyle = strokeColor;
       ctx.lineWidth = strokeWidth;
       ctx.stroke();
@@ -1477,6 +1618,7 @@ export default function App() {
     // Text Label Rendering (with cached measureText width)
     const shouldShowLabel = 
       isFocalNode ||
+      node._pinned ||
       (focusedSubnetwork && isEntityConnected && (node.type === 'Institution' || node.type === 'Akteur' || isSelected || isLinkEndpoint)) ||
       isSelected || 
       isLinkEndpoint ||
@@ -1492,14 +1634,14 @@ export default function App() {
     if (shouldShowLabel) {
       const label = node.label || node.id;
       const fontSize = Math.max(9 / globalScale, 2.5);
-      const isBold = node.type === 'Institution' || isFocalNode;
-      ctx.font = `${isBold ? 'bold ' : ''}${fontSize}px 'Space Mono', monospace`;
+      const isBold = node.type === 'Institution' || isFocalNode || node._pinned;
+      ctx.font = `${isBold ? '600 ' : ''}${fontSize}px 'IBM Plex Mono', monospace`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
 
       if (node._tw10 === undefined) {
         const prevFont = ctx.font;
-        ctx.font = `${isBold ? 'bold ' : ''}10px 'Space Mono', monospace`;
+        ctx.font = `${isBold ? '600 ' : ''}10px 'IBM Plex Mono', monospace`;
         node._tw10 = ctx.measureText(label).width;
         ctx.font = prevFont;
       }
@@ -1756,7 +1898,7 @@ export default function App() {
                 <span className="mono" style={{ backgroundColor: '#141413', color: '#F7F6F2', padding: '3px 8px', fontWeight: 700, fontSize: '10px', letterSpacing: '0.08em' }}>
                   PROJECT ECHO
                 </span>
-                <span style={{ fontSize: '14px', fontWeight: 700, letterSpacing: '-0.02em', color: '#141413' }}>
+                <span className="serif" style={{ fontSize: '16px', fontWeight: 700, letterSpacing: '-0.02em', color: '#141413' }}>
                   Shadow Museum Atlas
                 </span>
                 <span className="brand-subtitle" style={{ fontSize: '11px', color: '#78766F', fontWeight: 500, borderLeft: '1px solid #D8D5CD', paddingLeft: '8px' }}>
@@ -2037,6 +2179,19 @@ export default function App() {
               >
                 {t('Fit', 'Anpassen', 'Ajuster')}
               </button>
+
+              {pinnedNodeIds.size > 0 && (
+                <button
+                  type="button"
+                  data-testid="unpin-all-btn"
+                  onClick={handleUnpinAll}
+                  title={t('Release all manually pinned nodes (right-click a single node to unpin it)', 'Alle manuell gepinnten Knoten lösen (Rechtsklick löst einzelne Knoten)', 'Détacher tous les nœuds épinglés (clic droit pour un seul nœud)')}
+                  className="archival-btn"
+                  style={{ padding: '4px 8px', fontSize: '10.5px', backgroundColor: '#FEF3E7', color: '#9A3412', borderColor: '#D97706' }}
+                >
+                  {t(`Unpin all (${pinnedNodeIds.size})`, `Alle lösen (${pinnedNodeIds.size})`, `Détacher (${pinnedNodeIds.size})`)}
+                </button>
+              )}
 
               <button
                 onClick={handleResetLayout}
@@ -3143,12 +3298,14 @@ export default function App() {
               linkVisibility={hideBuiltInLinks}
               onRenderFramePre={onRenderFramePre}
               onNodeClick={handleGraphNodeClick}
+              onNodeRightClick={handleUnpinNode}
               onBackgroundClick={handleGraphBackgroundClick}
               onEngineStop={handleEngineStop}
+              onNodeDrag={handleNodeDrag}
               onNodeDragEnd={handleNodeDragEnd}
-              cooldownTicks={graphData.nodes.length > 0 && graphData.nodes[0].fx !== undefined ? 0 : 120}
-              d3AlphaDecay={0.02}
-              d3VelocityDecay={0.3}
+              cooldownTicks={simCooldown}
+              d3AlphaDecay={0.04}
+              d3VelocityDecay={0.42}
             />
           </div>
           {viewMode === 'map' ? (
@@ -3370,9 +3527,35 @@ export default function App() {
                                 ? t('Missing / No Depot', 'Verschollen / Kein Depot', 'Disparu / Sans dépôt')
                                 : nodeTypeLabel(selectedNodeDetails.type, lang)))}
                     </span>
-                    <h2 style={{ margin: '2px 0 0 0', fontSize: '16px', fontWeight: 700, wordBreak: 'break-word', color: '#141413' }}>
+                    <h2 className="serif" style={{ margin: '2px 0 0 0', fontSize: '18px', fontWeight: 700, wordBreak: 'break-word', color: '#141413' }}>
                       {selectedNodeDetails.label}
                     </h2>
+                    <div style={{ marginTop: '7px', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                      {pinnedNodeIds.has(selectedNodeDetails.id) ? (
+                        <button
+                          type="button"
+                          data-testid="inspector-unpin-btn"
+                          onClick={() => handleUnpinNode(selectedNodeDetails)}
+                          className="archival-btn"
+                          style={{ padding: '3px 8px', fontSize: '10px', backgroundColor: '#FEF3E7', color: '#9A3412', borderColor: '#D97706' }}
+                        >
+                          {t('Pinned · Unpin node', 'Gepinnt · Knoten lösen', 'Épinglé · Détacher')}
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          data-testid="inspector-pin-btn"
+                          onClick={() => handlePinNodeAtCurrent(selectedNodeDetails)}
+                          className="archival-btn"
+                          style={{ padding: '3px 8px', fontSize: '10px' }}
+                        >
+                          {t('Pin at position', 'Hier anpinnen', 'Épingler ici')}
+                        </button>
+                      )}
+                      <span style={{ fontSize: '10px', color: '#78766F' }}>
+                        {t('Drag to pin · Right-click to unpin', 'Ziehen = Pinnen · Rechtsklick = Lösen', 'Glisser = épingler · Clic droit = détacher')}
+                      </span>
+                    </div>
                   </div>
                   <button
                     onClick={() => setSelectedNode(null)}

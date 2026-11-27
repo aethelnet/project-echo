@@ -287,7 +287,7 @@ export default function VisualForensicsView({
       ctx.strokeRect(rx, ry, rw, rh);
       ctx.setLineDash([]);
       ctx.fillStyle = '#D97706';
-      ctx.font = 'bold 9px Space Mono, monospace';
+      ctx.font = 'bold 9px "IBM Plex Mono", monospace';
       ctx.fillText('ROI', rx + 3, Math.max(rect.y + 10, ry - 4));
       ctx.restore();
     };
@@ -359,7 +359,7 @@ export default function VisualForensicsView({
           ctx.fillRect(rx + 6, ry + 6, 24, 17);
           ctx.fillRect(rx + rw - 30, ry + 6, 24, 17);
           ctx.fillStyle = '#F7F6F2';
-          ctx.font = 'bold 10px Space Mono, monospace';
+          ctx.font = 'bold 10px "IBM Plex Mono", monospace';
           ctx.fillText('A', rx + 14, ry + 18);
           ctx.fillText('B', rx + rw - 22, ry + 18);
         }
@@ -550,7 +550,7 @@ export default function VisualForensicsView({
               "Forensique visuelle de provenance · Reconstruction sans numéro d'inventaire"
             )}
           </div>
-          <h2 style={{ fontSize: '16px', fontWeight: 700, color: '#141413', margin: '4px 0 6px 0' }}>
+          <h2 className="serif" style={{ fontSize: '19px', fontWeight: 700, color: '#141413', margin: '4px 0 6px 0' }}>
             {t(
               'Geometric Single-Object Verification Across Historical Photo Series',
               'Geometrische Einzelobjekt-Verifikation über historische Bildreihen',

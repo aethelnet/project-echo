@@ -4,6 +4,13 @@
  * directly in the serverless browser app and preview/verify extracted triples before committing.
  */
 
+export type HighlightKind = 'object' | 'actor' | 'depot' | 'loot' | 'donation' | 'community';
+
+export interface TextHighlightSpan {
+  text: string;
+  kind: HighlightKind | null;
+}
+
 export interface ExtractedTriple {
   source: string;
   source_label: string;
@@ -19,6 +26,9 @@ export interface ExtractedTriple {
   kollision: boolean;
   narrativ: string;
   herkunft?: string;
+  paragraph_index?: number;
+  source_excerpt?: string;
+  zitat?: string;
 }
 
 const KNOWN_ACTORS: Record<string, { rolle: string; pattern: RegExp }> = {
@@ -233,6 +243,9 @@ export function parseSourceTextInBrowser(rawText: string, docName = 'Archival_Ex
           kollision: false,
           narrativ: 'FORENSISCHE_REALITAET',
           herkunft: community || undefined,
+          paragraph_index: idx,
+          source_excerpt: chunk,
+          zitat: chunk,
         });
       }
 
@@ -264,6 +277,9 @@ export function parseSourceTextInBrowser(rawText: string, docName = 'Archival_Ex
           kollision: hasCollision,
           narrativ: 'FORENSISCHE_REALITAET',
           herkunft: community || undefined,
+          paragraph_index: idx,
+          source_excerpt: chunk,
+          zitat: chunk,
         });
 
         if (hasCollision) {
@@ -285,6 +301,9 @@ export function parseSourceTextInBrowser(rawText: string, docName = 'Archival_Ex
             kollision: true,
             narrativ: 'MUSEUMS_NARRATIV',
             herkunft: community || undefined,
+            paragraph_index: idx,
+            source_excerpt: chunk,
+            zitat: chunk,
           });
         }
       }
@@ -299,6 +318,101 @@ export function parseSourceTextInBrowser(rawText: string, docName = 'Archival_Ex
     communities: Array.from(allComms),
     collisions,
   };
+}
+
+const LOOT_SIGNAL_WORDS = [
+  'punitive expedition', 'spoils of war', 'seized during', 'expédition punitive', 'prise de guerre',
+  'strafexpedition', 'kriegsbeute', 'brandschatzung', 'geplündert', 'plünderten', 'beschlagnahmt',
+  'enteignung', 'angeeignet', 'erzwungen', 'strafzug', 'looted', 'plundered', 'captured',
+  'pillaged', 'confiscated', 'expropriated', 'coerced', 'sacked', 'pillage', 'confisqué',
+  'extorqué', 'réquisition', 'saisis', 'saisi', 'butin', 'pillé', 'raub', 'loot',
+];
+
+const DONATION_SIGNAL_WORDS = [
+  'donated', 'gift of', 'bequeathed', 'presented by', 'purchased', 'auction',
+  'schenkung', 'geschenk', 'geschenkt', 'verkauft', 'ankauf', 'auktion',
+  'don de', 'vendu', 'acheté', 'vente', 'legs', 'sold',
+];
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Produces non-overlapping inline highlight segments so the Document Reader shows
+ * the exact words/tokens from which objects, actors, depots, loot signals, and donation claims were extracted.
+ */
+export function highlightArchivalText(text: string): TextHighlightSpan[] {
+  if (!text) return [];
+  const candidates: Array<{ start: number; end: number; kind: HighlightKind; prio: number }> = [];
+
+  const addMatches = (re: RegExp, kind: HighlightKind, prio: number) => {
+    const flags = re.flags.includes('g') ? re.flags : `${re.flags}g`;
+    const gRe = new RegExp(re.source, flags);
+    for (const m of text.matchAll(gRe)) {
+      if (m.index === undefined || !m[0]) continue;
+      candidates.push({ start: m.index, end: m.index + m[0].length, kind, prio });
+    }
+  };
+
+  // 1. Inventory numbers / objects (highest priority)
+  [
+    /\b(?:Af|Am|Oc|As|Eu)\d{4},\d{3,5}\.\d+[a-z]?\b/g,
+    /\b7[01]\.\d{4}\.\d+\.\d+(?:\.\d+)?\b/g,
+    /\bEO\.0\.0\.\d{3,6}\b/g,
+    /\b(?:III|IV|V|VI)\s*[A-Z]\s*\d+(?:[\/a-zA-Z0-9-]+)?\b/g,
+    /\b(?:VK|MAf|IM|EA|USNM)\s*[\.-]?\s*\d{3,7}(?:[\.-]\d+)?\b/g,
+    /\b(?:Inv\.?-?\s*Nr\.?|Acc\.?\s*No\.?|Cat\.?\s*No\.?|Obj\.?-?\s*Nr\.?)\s*[A-Za-z0-9\.,\/-]{2,20}\b/g,
+  ].forEach((p) => addMatches(p, 'object', 6));
+
+  // 2. Institutions / Depots
+  for (const instName of Object.keys(KNOWN_INSTITUTIONS)) {
+    addMatches(new RegExp(escapeRegExp(instName), 'gi'), 'depot', 5);
+  }
+
+  // 3. Known & titled colonial actors
+  for (const [actName, meta] of Object.entries(KNOWN_ACTORS)) {
+    addMatches(new RegExp(escapeRegExp(actName), 'gi'), 'actor', 5);
+    addMatches(meta.pattern, 'actor', 4);
+  }
+  addMatches(
+    /\b(?:Hauptmann|Oberleutnant|Leutnant|Major|Oberst|General|Gouverneur|Konsul|Admiral|Captain|Colonel|Brigadier|Governor|Consul|Commander|Commandant|Capitaine|Général)\s+[A-ZÄÖÜÉÈ][a-zäöüßéèê\-]+(?:\s+(?:von|van|de|du|[A-ZÄÖÜÉÈ]\.)\s*[A-ZÄÖÜÉÈ][a-zäöüßéèê\-]+|\s+[A-ZÄÖÜÉÈ][a-zäöüßéèê\-]+)?/g,
+    'actor',
+    4,
+  );
+
+  // 4. Loot & Donation legal-signal triggers
+  addMatches(new RegExp(`\\b(?:${LOOT_SIGNAL_WORDS.map(escapeRegExp).join('|')})\\b`, 'gi'), 'loot', 4);
+  addMatches(new RegExp(`\\b(?:${DONATION_SIGNAL_WORDS.map(escapeRegExp).join('|')})\\b`, 'gi'), 'donation', 4);
+
+  // 5. Origin communities
+  for (const [, cre] of ORIGIN_COMMUNITIES) {
+    addMatches(cre, 'community', 3);
+  }
+
+  candidates.sort((a, b) => a.start - b.start || b.prio - a.prio || (b.end - b.start) - (a.end - a.start));
+  const accepted: typeof candidates = [];
+  let cursor = 0;
+  for (const c of candidates) {
+    if (c.start >= cursor) {
+      accepted.push(c);
+      cursor = c.end;
+    }
+  }
+
+  const out: TextHighlightSpan[] = [];
+  let pos = 0;
+  for (const seg of accepted) {
+    if (seg.start > pos) {
+      out.push({ text: text.slice(pos, seg.start), kind: null });
+    }
+    out.push({ text: text.slice(seg.start, seg.end), kind: seg.kind });
+    pos = seg.end;
+  }
+  if (pos < text.length) {
+    out.push({ text: text.slice(pos), kind: null });
+  }
+  return out;
 }
 
 export const SAMPLE_ARCHIVAL_EXCERPTS = [

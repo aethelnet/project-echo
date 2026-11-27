@@ -337,7 +337,7 @@ export default function GeodataMap({
             box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
             padding: 3px 7px;
             border-radius: 2px;
-            font-family: 'Space Mono', monospace;
+            font-family: 'IBM Plex Mono', monospace;
             font-size: 9.5px;
             font-weight: 700;
             white-space: nowrap;

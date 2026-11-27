@@ -1,7 +1,11 @@
 // @ts-nocheck
 import { useState, useMemo, useRef } from 'react';
 import { useLang, relLabel } from './i18n';
-import { parseSourceTextInBrowser, SAMPLE_ARCHIVAL_EXCERPTS } from './browserSourceParser';
+import {
+  parseSourceTextInBrowser,
+  highlightArchivalText,
+  SAMPLE_ARCHIVAL_EXCERPTS,
+} from './browserSourceParser';
 
 interface DocumentsViewProps {
   publications: any[];
@@ -27,6 +31,23 @@ const REL_COLORS: Record<string, { bg: string; fg: string; border: string }> = {
   LAGERT_IN: { bg: '#F7F6F2', fg: '#3F3E3A', border: '#8C8A82' },
 };
 
+function HighlightedPassage({ text }: { text: string }) {
+  const spans = useMemo(() => highlightArchivalText(text), [text]);
+  return (
+    <>
+      {spans.map((sp, i) =>
+        sp.kind ? (
+          <mark key={i} className={`doc-hl doc-hl-${sp.kind}`}>
+            {sp.text}
+          </mark>
+        ) : (
+          <span key={i}>{sp.text}</span>
+        )
+      )}
+    </>
+  );
+}
+
 export default function DocumentsView({
   publications,
   selectedPubs,
@@ -47,11 +68,24 @@ export default function DocumentsView({
   const [evidenceSearch, setEvidenceSearch] = useState<string>('');
   const [visibleLimit, setVisibleLimit] = useState<number>(30);
 
+  // Live Archival Extraction Workbench state
   const [draftFilename, setDraftFilename] = useState<string>('Archival_Excerpt.txt');
   const [draftText, setDraftText] = useState<string>('');
   const [isCommitting, setIsCommitting] = useState<boolean>(false);
   const [commitFeedback, setCommitFeedback] = useState<{ ok: boolean; msg: string; pubId?: string } | null>(null);
   const fileUploadRef = useRef<HTMLInputElement | null>(null);
+
+  // Document Reader State (shows exact source passage + inline highlights for any tag/relation)
+  const [readerState, setReaderState] = useState<{
+    mode: 'fulltext' | 'citation';
+    title: string;
+    subtitle: string;
+    fullText?: string;
+    activeParagraphIdx?: number;
+    activeLink?: any;
+    activeTriple?: any;
+  } | null>(null);
+  const readerRef = useRef<HTMLDivElement | null>(null);
 
   const pubBreakdown = useMemo(() => {
     const map: Record<string, { total: number; loot: number; donation: number; suspicion: number; collision: number; holding: number }> = {};
@@ -92,10 +126,88 @@ export default function DocumentsView({
     return parseSourceTextInBrowser(draftText, draftFilename || 'Archival_Excerpt.txt');
   }, [draftText, draftFilename]);
 
+  const scrollToReader = () => {
+    setTimeout(() => {
+      readerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }, 40);
+  };
+
+  const openPublicationInReader = (pub: any) => {
+    if (pub.source_text) {
+      setReaderState({
+        mode: 'fulltext',
+        title: pub.name,
+        subtitle: `${pub.kuerzel} · ${pub.typ || ''}`,
+        fullText: pub.source_text,
+        activeParagraphIdx: 0,
+      });
+      scrollToReader();
+      return;
+    }
+    const firstWithQuote = graphLinks.find((l) => l.publikation === pub.id && (l.zitat || l.behauptung || l.beleg));
+    setReaderState({
+      mode: 'citation',
+      title: pub.name,
+      subtitle: `${pub.kuerzel}${pub.jahr ? ` (${pub.jahr})` : ''}${pub.typ ? ` · ${pub.typ}` : ''}`,
+      activeLink: firstWithQuote || null,
+    });
+    scrollToReader();
+  };
+
+  const openLinkInReader = (link: any) => {
+    const pub = publications.find((p) => p.id === link.publikation);
+    if (pub?.source_text) {
+      setReaderState({
+        mode: 'fulltext',
+        title: pub.name,
+        subtitle: `${pub.kuerzel} · ${link.beleg || ''}`,
+        fullText: pub.source_text,
+        activeParagraphIdx: typeof link.paragraph_index === 'number' ? link.paragraph_index : 0,
+        activeLink: link,
+      });
+    } else if (link.source_excerpt) {
+      setReaderState({
+        mode: 'fulltext',
+        title: pub?.name || link.publikation || t('Archival Excerpt', 'Archivauszug', "Extrait d'archive"),
+        subtitle: link.beleg || '',
+        fullText: link.source_excerpt,
+        activeParagraphIdx: 0,
+        activeLink: link,
+      });
+    } else {
+      setReaderState({
+        mode: 'citation',
+        title: pub?.name || link.publikation || t('Indexed Archival Record', 'Indizierter Archivbeleg', 'Notice archivistique indexée'),
+        subtitle: `${pub?.kuerzel || link.publikation || ''}${link.jahr ? ` · ${link.jahr}` : ''}`,
+        activeLink: link,
+      });
+    }
+    scrollToReader();
+  };
+
+  const openDraftTripleInReader = (trItem: any) => {
+    setReaderState({
+      mode: 'fulltext',
+      title: draftFilename || t('Draft Archival Document', 'Entwurf Archivdokument', "Brouillon d'archive"),
+      subtitle: trItem.beleg || t('Live Extraction Trace', 'Live-Extraktionsspur', "Trace d'extraction en direct"),
+      fullText: draftText,
+      activeParagraphIdx: typeof trItem.paragraph_index === 'number' ? trItem.paragraph_index : 0,
+      activeTriple: trItem,
+    });
+    scrollToReader();
+  };
+
   const handleLoadSample = (sample: (typeof SAMPLE_ARCHIVAL_EXCERPTS)[number]) => {
     setDraftFilename(sample.filename);
     setDraftText(sample.text);
     setCommitFeedback(null);
+    setReaderState({
+      mode: 'fulltext',
+      title: sample.filename,
+      subtitle: `${sample.lang} · ${sample.title}`,
+      fullText: sample.text,
+      activeParagraphIdx: 0,
+    });
   };
 
   const handleUploadFile = async (e: any) => {
@@ -108,6 +220,13 @@ export default function DocumentsView({
       const content = await file.text();
       setDraftFilename(file.name);
       setDraftText(content);
+      setReaderState({
+        mode: 'fulltext',
+        title: file.name,
+        subtitle: t('Loaded text source — live highlight preview', 'Geladene Textquelle — Live-Markierungsvorschau', 'Source texte chargée — aperçu surligné'),
+        fullText: content,
+        activeParagraphIdx: 0,
+      });
       if (fileUploadRef.current) fileUploadRef.current.value = '';
       return;
     }
@@ -214,6 +333,25 @@ export default function DocumentsView({
   const selectedPubObj = publications.find((p) => p.id === selectedPubId) || null;
   const totalCollisions = useMemo(() => graphLinks.filter((l) => l.kollision).length, [graphLinks]);
 
+  const readerParagraphs = useMemo(() => {
+    if (!readerState?.fullText) return [];
+    const blocks = readerState.fullText
+      .split(/\f|\n\s*\n/)
+      .map((b) => b.trim())
+      .filter((b) => b.length > 0);
+    return blocks.length > 0 ? blocks : [readerState.fullText];
+  }, [readerState?.fullText]);
+
+  // Sibling citations sharing the same archival signature/publication for corpus citation mode
+  const relatedCorpusCitations = useMemo(() => {
+    if (!readerState || readerState.mode !== 'citation' || !readerState.activeLink) return [];
+    const targetPub = readerState.activeLink.publikation;
+    const targetBeleg = readerState.activeLink.beleg;
+    return graphLinks
+      .filter((l) => l !== readerState.activeLink && l.publikation === targetPub && (!targetBeleg || l.beleg === targetBeleg))
+      .slice(0, 6);
+  }, [readerState, graphLinks]);
+
   return (
     <div className="docs-view">
       <input
@@ -229,23 +367,23 @@ export default function DocumentsView({
         <div style={{ maxWidth: '780px', flex: '1 1 320px' }}>
           <div className="mono" style={{ fontSize: '10px', fontWeight: 700, color: '#1E40AF', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
             {t(
-              'Archival Source Corpus & Document Analysis · DE / EN / FR',
-              'Archiv-Quellenkorpus & Dokumenten-Analyse · DE / EN / FR',
-              'Corpus archivistique & analyse documentaire · DE / EN / FR'
+              'Archival Source Corpus, Reader & Extraction Audit · DE / EN / FR',
+              'Archiv-Quellenkorpus, Document Reader & Extraktions-Audit · DE / EN / FR',
+              'Corpus archivistique, lecteur de sources & audit d’extraction · DE / EN / FR'
             )}
           </div>
-          <h2 style={{ fontSize: '16px', fontWeight: 700, color: '#141413', margin: '4px 0 6px 0' }}>
+          <h2 className="serif" style={{ fontSize: '19px', fontWeight: 700, color: '#141413', margin: '4px 0 6px 0' }}>
             {t(
-              'Primary Literature, Colonial Ledger Inspection & Live Triple Extraction',
-              'Primärliteratur, historische Zugangsbücher & Live-Extraktion von Provenienz-Tripeln',
-              'Sources primaires, inspection des registres coloniaux et extraction en direct'
+              'Primary Literature, Inline Evidence Reader & Live Triple Extraction',
+              'Primärliteratur, Dokumenten-Reader mit Beleg-Markierung & Live-Extraktion',
+              'Sources primaires, lecteur avec surlignage des preuves et extraction en direct'
             )}
           </h2>
           <p style={{ fontSize: '12px', color: '#52514C', margin: 0, lineHeight: 1.55 }}>
             {t(
-              'Inspect every publication powering the Shadow Museum Atlas, search archival signatures and primary citations, or paste archival excerpts / drop .txt or .csv ledgers to extract and verify relations before committing them into the knowledge graph.',
-              'Prüfe jede Publikation hinter dem Shadow Museum Atlas, durchsuche Archivsignaturen und Originalbelege oder füge Aktenauszüge / .txt- bzw. .csv-Zugangsbücher ein, um Provenienz-Relationen live zu extrahieren und vor dem Speichern zu verifizieren.',
-              "Inspectez chaque publication alimentant l'Atlas, recherchez des cotes d'archives et citations primaires, ou collez des extraits / importez des registres .txt ou .csv pour extraire et vérifier des relations avant de les ancrer dans le graphe."
+              'Inspect every publication powering the Shadow Museum Atlas, open passages in the Document Reader to verify exactly where each object, actor, and loot/donation tag was extracted from, or paste archival excerpts / drop .txt or .csv ledgers.',
+              'Prüfe jede Publikation hinter dem Shadow Museum Atlas, öffne Textstellen im Dokumenten-Reader um exakt zu sehen, aus welchem Satz ein Objekt-, Akteur- oder Raub-/Schenkungs-Tag gelesen wurde, oder füge eigene Aktenauszüge (.txt / .csv) ein.',
+              "Inspectez chaque publication de l'Atlas, ouvrez les passages dans le lecteur de sources pour vérifier exactement d'où provient chaque balise (objet, acteur, pillage ou don), ou importez vos propres extraits (.txt / .csv)."
             )}
           </p>
         </div>
@@ -310,8 +448,10 @@ export default function DocumentsView({
                       {pub.jahr && (
                         <span className="mono" style={{ fontSize: '10px', color: '#52514C' }}>{pub.jahr}</span>
                       )}
-                      {pub.typ && (
-                        <span style={{ fontSize: '10px', color: '#1E40AF', fontWeight: 600 }}>{pub.typ}</span>
+                      {pub.source_text && (
+                        <span style={{ fontSize: '9.5px', color: '#166534', backgroundColor: '#F0FDF4', border: '1px solid #BBF7D0', padding: '0 5px', fontWeight: 600 }}>
+                          {t('Full text', 'Volltext', 'Texte intégral')}
+                        </span>
                       )}
                     </div>
                     <div style={{ fontSize: '12px', fontWeight: 700, color: '#141413', marginTop: '5px', wordBreak: 'break-word' }}>
@@ -360,24 +500,35 @@ export default function DocumentsView({
                   </div>
                 )}
 
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '9px', gap: '6px' }}>
-                  <button
-                    type="button"
-                    onClick={(ev) => { ev.stopPropagation(); onTogglePublication(pub.id); }}
-                    style={{
-                      padding: '3px 8px',
-                      fontSize: '10.5px',
-                      fontWeight: 600,
-                      border: '1px solid #D8D5CD',
-                      backgroundColor: isActive ? '#141413' : '#FFFFFF',
-                      color: isActive ? '#FFFFFF' : '#52514C',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {isActive
-                      ? t('✓ Active in graph', '✓ Im Graphen aktiv', '✓ Actif dans le graphe')
-                      : t('○ Hidden — enable', '○ Aus — aktivieren', '○ Masqué — activer')}
-                  </button>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '9px', gap: '6px', flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      onClick={(ev) => { ev.stopPropagation(); onTogglePublication(pub.id); }}
+                      style={{
+                        padding: '3px 8px',
+                        fontSize: '10.5px',
+                        fontWeight: 600,
+                        border: '1px solid #D8D5CD',
+                        backgroundColor: isActive ? '#141413' : '#FFFFFF',
+                        color: isActive ? '#FFFFFF' : '#52514C',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {isActive
+                        ? t('✓ Active', '✓ Aktiv', '✓ Actif')
+                        : t('○ Enable', '○ Aktivieren', '○ Activer')}
+                    </button>
+                    <button
+                      type="button"
+                      data-testid={`docs-read-pub-${pub.id}`}
+                      onClick={(ev) => { ev.stopPropagation(); setSelectedPubId(pub.id); openPublicationInReader(pub); }}
+                      className="archival-btn"
+                      style={{ padding: '3px 8px', fontSize: '10.5px' }}
+                    >
+                      {t('Open Reader', 'Im Reader öffnen', 'Ouvrir lecteur')}
+                    </button>
+                  </div>
 
                   {isResearcher && (
                     <button
@@ -402,8 +553,179 @@ export default function DocumentsView({
           })}
         </div>
 
-        {/* RIGHT COLUMN: LIVE EXTRACTION WORKBENCH + CITATION EXPLORER */}
+        {/* RIGHT COLUMN: DOCUMENT READER + LIVE WORKBENCH + CITATION EXPLORER */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', minWidth: 0 }}>
+
+          {/* ARCHIVAL DOCUMENT READER (INLINE SOURCE HIGHLIGHTING) */}
+          {readerState && (
+            <div
+              ref={readerRef}
+              data-testid="doc-reader-panel"
+              style={{
+                backgroundColor: '#FFFFFF',
+                border: '1px solid #1C1B19',
+                borderTop: '3px solid #92400E',
+                padding: '16px 18px',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '10px', borderBottom: '1px solid #D8D5CD', paddingBottom: '10px', marginBottom: '12px' }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <span className="mono" style={{ fontSize: '9.5px', fontWeight: 700, padding: '2px 6px', backgroundColor: readerState.mode === 'fulltext' ? '#F0FDF4' : '#FFFBEB', color: readerState.mode === 'fulltext' ? '#166534' : '#92400E', border: `1px solid ${readerState.mode === 'fulltext' ? '#BBF7D0' : '#EBD7A0'}` }}>
+                      {readerState.mode === 'fulltext'
+                        ? t('DOCUMENT READER · FULL SOURCE TEXT', 'DOKUMENTEN-READER · VOLLTEXT', 'LECTEUR · TEXTE INTÉGRAL')
+                        : t('DOCUMENT READER · INDEXED CORPUS PASSAGE', 'DOKUMENTEN-READER · INDIZIERTER KORPUS-BELEG', 'LECTEUR · PASSAGE INDEXÉ DU CORPUS')}
+                    </span>
+                    <span className="mono" style={{ fontSize: '10px', color: '#78766F' }}>{readerState.subtitle}</span>
+                  </div>
+                  <h3 className="serif" style={{ fontSize: '17px', fontWeight: 700, margin: '6px 0 0 0', color: '#141413' }}>
+                    {readerState.title}
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setReaderState(null)}
+                  className="archival-btn"
+                  style={{ padding: '3px 9px', fontSize: '11px' }}
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Inline Tag Color Legend */}
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center', marginBottom: '12px', fontSize: '10.5px', color: '#52514C' }}>
+                <span style={{ fontWeight: 600 }}>{t('Detected spans:', 'Erkannte Textstellen:', 'Segments détectés :')}</span>
+                <span className="doc-hl doc-hl-object">{t('Inventory / Object', 'Inventarnr. / Objekt', 'Inventaire / Objet')}</span>
+                <span className="doc-hl doc-hl-actor">{t('Actor', 'Akteur', 'Acteur')}</span>
+                <span className="doc-hl doc-hl-loot">{t('Loot / Seizure signal', 'Raub-Signalwort', 'Signal de pillage')}</span>
+                <span className="doc-hl doc-hl-donation">{t('Donation / Sale claim', 'Schenkung / Kauf', 'Don / Vente allégué')}</span>
+                <span className="doc-hl doc-hl-depot">{t('Depot / Museum', 'Depot / Museum', 'Dépôt / Musée')}</span>
+                <span className="doc-hl doc-hl-community">{t('Origin', 'Herkunft', 'Origine')}</span>
+              </div>
+
+              {readerState.mode === 'fulltext' ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '300px', overflowY: 'auto', paddingRight: '4px' }}>
+                  {readerParagraphs.map((para, pIdx) => {
+                    const isFocused = readerState.activeParagraphIdx === pIdx;
+                    return (
+                      <div
+                        key={pIdx}
+                        style={{
+                          padding: '12px 14px',
+                          backgroundColor: isFocused ? '#FFFDF5' : '#F7F6F2',
+                          border: isFocused ? '1px solid #D97706' : '1px solid #E5E2DA',
+                          borderLeft: isFocused ? '3px solid #92400E' : '3px solid #C8C4BA',
+                        }}
+                      >
+                        <div className="mono" style={{ fontSize: '9.5px', color: '#78766F', marginBottom: '6px', display: 'flex', justifyContent: 'space-between' }}>
+                          <span>¶ {pIdx + 1}</span>
+                          {isFocused && (
+                            <span style={{ color: '#92400E', fontWeight: 700 }}>
+                              {t('Extracted passage', 'Extrahierte Textstelle', 'Passage extrait')}
+                            </span>
+                          )}
+                        </div>
+                        <div className="serif" style={{ fontSize: '14px', lineHeight: 1.72, color: '#141413' }}>
+                          <HighlightedPassage text={para} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  {readerState.activeLink ? (
+                    <div style={{ padding: '14px 16px', backgroundColor: '#FFFDF5', border: '1px solid #E5D4A1', borderLeft: '3px solid #92400E' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: '8px' }}>
+                        <div style={{ fontSize: '12px', fontWeight: 700, color: '#141413' }}>
+                          {readerState.activeLink.source_label || readerState.activeLink.source?.id || readerState.activeLink.source}{' '}
+                          <span className="mono" style={{ fontSize: '10px', padding: '1px 5px', backgroundColor: '#141413', color: '#FFFFFF', margin: '0 4px' }}>
+                            {relLabel(readerState.activeLink.type, lang)}
+                          </span>{' '}
+                          {readerState.activeLink.target_label || readerState.activeLink.target?.id || readerState.activeLink.target}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => onJumpToLink(readerState.activeLink)}
+                          className="archival-btn"
+                          style={{ padding: '3px 8px', fontSize: '10px' }}
+                        >
+                          {t('Inspect edge in Graph →', 'Kante im Graphen prüfen →', 'Inspecter dans le graphe →')}
+                        </button>
+                      </div>
+
+                      {readerState.activeLink.beleg && (
+                        <div style={{ fontSize: '12px', color: '#3F3E3A', marginBottom: '8px' }}>
+                          <strong>{t('Archival signature / location:', 'Archivsignatur / Fundstelle:', "Cote d'archive / localisation :")}</strong>{' '}
+                          <span className="mono" style={{ fontSize: '11px' }}>
+                            <HighlightedPassage text={String(readerState.activeLink.beleg)} />
+                          </span>
+                        </div>
+                      )}
+
+                      {readerState.activeLink.zitat && (
+                        <blockquote className="serif" style={{ margin: '0 0 8px 0', padding: '10px 14px', backgroundColor: '#FFFFFF', borderLeft: '3px solid #141413', fontSize: '14px', lineHeight: 1.7, fontStyle: 'italic', color: '#141413' }}>
+                          “<HighlightedPassage text={String(readerState.activeLink.zitat)} />”
+                        </blockquote>
+                      )}
+
+                      {readerState.activeLink.behauptung && (
+                        <div style={{ fontSize: '12.5px', lineHeight: 1.6, padding: '8px 12px', backgroundColor: '#FFFFFF', border: '1px solid #E5E2DA' }}>
+                          <strong style={{ fontSize: '10.5px', color: '#52514C', display: 'block', marginBottom: '2px' }}>
+                            {t('Recorded statement / context:', 'Dokumentierte Aussage / Kontext:', 'Énoncé / contexte documenté :')}
+                          </strong>
+                          <span className="serif" style={{ fontSize: '13.5px' }}>
+                            <HighlightedPassage text={String(readerState.activeLink.behauptung)} />
+                          </span>
+                        </div>
+                      )}
+
+                      {readerState.activeLink.begruendung && (
+                        <div style={{ fontSize: '11.5px', color: '#155E75', marginTop: '8px' }}>
+                          <strong>{t('Forensic derivation:', 'Forensische Herleitung:', 'Dérivation forensique :')}</strong>{' '}
+                          <HighlightedPassage text={String(readerState.activeLink.begruendung)} />
+                        </div>
+                      )}
+
+                      <div style={{ fontSize: '10.5px', color: '#78766F', marginTop: '10px' }}>
+                        {t(
+                          'Note: Copyrighted monograph full texts are not redistributed in the static web snapshot; exact archival citations and primary quotes extracted from the source are displayed above.',
+                          'Hinweis: Urheberrechtlich geschützte Monografie-Volltexte werden im statischen Web-Snapshot nicht gespiegelt; angezeigt werden die exakt indizierten Fundstellen, Archivsignaturen und Originalzitate.',
+                          "Remarque : les textes intégraux sous droits d'auteur ne sont pas redistribués dans l'instantané statique ; seules les cotes d'archives et citations primaires indexées sont affichées."
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: '12px', color: '#78766F', padding: '12px', backgroundColor: '#F7F6F2' }}>
+                      {t('Select any citation below to inspect its exact archival passage.', 'Wähle unten einen Beleg aus, um die genaue Textstelle im Reader zu prüfen.', 'Sélectionnez une citation ci-dessous pour afficher le passage exact.')}
+                    </div>
+                  )}
+
+                  {relatedCorpusCitations.length > 0 && (
+                    <div style={{ fontSize: '11px', color: '#52514C' }}>
+                      <strong style={{ display: 'block', marginBottom: '5px' }}>
+                        {t('Other tags extracted from this same reference:', 'Weitere Tags aus derselben Fundstelle:', 'Autres relations extraites de la même référence :')}
+                      </strong>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
+                        {relatedCorpusCitations.map((rl, i) => (
+                          <button
+                            key={i}
+                            type="button"
+                            onClick={() => openLinkInReader(rl)}
+                            className="archival-btn"
+                            style={{ padding: '3px 8px', fontSize: '10.5px' }}
+                          >
+                            {rl.source_label || rl.source?.id || rl.source} → {rl.target_label || rl.target?.id || rl.target}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* PANEL 1: LIVE DOCUMENT EXTRACTION WORKBENCH */}
           <div style={{ backgroundColor: '#FFFFFF', border: '1px solid #D8D5CD', padding: '14px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '10px', borderBottom: '1px solid #D8D5CD', paddingBottom: '10px', marginBottom: '12px' }}>
@@ -417,9 +739,9 @@ export default function DocumentsView({
                 </div>
                 <div style={{ fontSize: '11.5px', color: '#52514C', marginTop: '2px' }}>
                   {t(
-                    'Paste colonial archival excerpts (DE / EN / FR) or load a .txt / .csv / .pdf / .xlsx file to extract inventory numbers, actors, depots & collisions in real time.',
-                    'Füge Archivauszüge (DE / EN / FR) ein oder lade eine .txt / .csv / .pdf / .xlsx-Datei, um Inventarnummern, Akteure, Depots & Kollisionen in Echtzeit zu extrahieren.',
-                    "Collez un extrait d'archive (DE / EN / FR) ou importez un fichier .txt / .csv / .pdf / .xlsx pour extraire numéros d'inventaire, acteurs, dépôts et collisions en temps réel."
+                    'Paste colonial archival excerpts (DE / EN / FR) or load a .txt / .csv / .pdf / .xlsx file to inspect highlighted extractions before committing to the graph.',
+                    'Füge Archivauszüge (DE / EN / FR) ein oder lade eine .txt / .csv / .pdf / .xlsx-Datei, um alle markierten Extraktionen im Reader zu prüfen und in den Graphen zu übernehmen.',
+                    "Collez un extrait d'archive (DE / EN / FR) ou importez un fichier .txt / .csv / .pdf / .xlsx pour inspecter les extractions surlignées avant de les ancrer."
                   )}
                 </div>
               </div>
@@ -433,7 +755,6 @@ export default function DocumentsView({
               </button>
             </div>
 
-            {/* 1-Click Multilingual Archival Samples */}
             <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center', marginBottom: '10px' }}>
               <span style={{ fontSize: '10.5px', fontWeight: 600, color: '#52514C' }}>
                 {t('Sample excerpts:', 'Beispiel-Akten:', 'Extraits tests :')}
@@ -525,6 +846,14 @@ export default function DocumentsView({
                                 {t('Dissonance', 'Dissonanz', 'Dissonance')}
                               </span>
                             )}
+                            <button
+                              type="button"
+                              onClick={() => openDraftTripleInReader(trItem)}
+                              className="archival-btn"
+                              style={{ padding: '2px 7px', fontSize: '9.5px' }}
+                            >
+                              {t('Show in text', 'Im Text zeigen', 'Voir dans le texte')}
+                            </button>
                           </div>
                         </div>
                       );
@@ -699,7 +1028,7 @@ export default function DocumentsView({
                         </button>
                       </div>
 
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                         {link.jahr && (
                           <span className="mono" style={{ fontSize: '10.5px', color: '#52514C' }}>{link.jahr}</span>
                         )}
@@ -710,11 +1039,19 @@ export default function DocumentsView({
                         )}
                         <button
                           type="button"
+                          onClick={() => openLinkInReader(link)}
+                          className="archival-btn"
+                          style={{ padding: '2px 8px', fontSize: '10px', borderColor: '#B45309', color: '#92400E', backgroundColor: '#FFFDF5' }}
+                        >
+                          {t('Show in Source', 'Fundstelle lesen', 'Lire la source')}
+                        </button>
+                        <button
+                          type="button"
                           onClick={() => onJumpToLink(link)}
                           className="archival-btn"
                           style={{ padding: '2px 8px', fontSize: '10px' }}
                         >
-                          {t('Inspect →', 'Prüfen →', 'Inspecter →')}
+                          {t('Graph →', 'Graph →', 'Graphe →')}
                         </button>
                       </div>
                     </div>
@@ -726,7 +1063,7 @@ export default function DocumentsView({
                       </div>
                     )}
                     {link.zitat && (
-                      <div style={{ fontSize: '11.5px', color: '#52514C', fontStyle: 'italic', marginTop: '4px', borderLeft: '2px solid #C8C4BA', paddingLeft: '8px', lineHeight: 1.5 }}>
+                      <div className="serif" style={{ fontSize: '12.5px', color: '#52514C', fontStyle: 'italic', marginTop: '4px', borderLeft: '2px solid #C8C4BA', paddingLeft: '8px', lineHeight: 1.55 }}>
                         “{link.zitat}”
                       </div>
                     )}

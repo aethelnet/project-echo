@@ -845,6 +845,7 @@ async function handleStaticApi(urlObj: URL, method: string, init?: RequestInit):
         `${newEdges.length} relations de provenance extraites (${parsed.inventories.length} objets, ${parsed.collisions} collisions).`,
       ),
       edge_count: newEdges.length,
+      source_text: rawText,
     });
     writeLocalJson(LS_CUSTOM_PUBS_KEY, customPubs);
 
