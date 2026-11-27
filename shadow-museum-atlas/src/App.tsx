@@ -2612,10 +2612,10 @@ export default function App() {
                     width: '100%',
                     border: 'none',
                     outline: 'none',
-                    fontSize: '10px',
-                    fontWeight: 'bold',
+                    fontSize: '11px',
+                    color: '#141413',
                     backgroundColor: 'transparent',
-                    fontFamily: "'Space Mono', monospace"
+                    fontFamily: 'var(--font-sans)'
                   }}
                 />
                 {searchTerm && (

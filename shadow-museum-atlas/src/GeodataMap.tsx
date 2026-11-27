@@ -227,7 +227,7 @@ export default function GeodataMap({
       const tooltipContent = `
         <div style="font-family: 'Inter', sans-serif; font-size: 11.5px; padding: 6px 9px; background: #141413; color: #F7F6F2; border: 1px solid ${strokeColor}; border-left: 3px solid ${strokeColor};">
           <div style="font-weight: 700; color: #FFFFFF;">${route.origin_name} &rarr; ${route.depot_city}</div>
-          <div style="margin-top: 3px; font-size: 10.5px;"><b>${tr('Objects', 'Kulturgüter', 'Biens culturels')}:</b> <span style="font-family:'Space Mono',monospace;">${route.object_count}</span></div>
+          <div style="margin-top: 3px; font-size: 10.5px;"><b>${tr('Objects', 'Kulturgüter', 'Biens culturels')}:</b> <span style="font-family:'IBM Plex Mono',ui-monospace,monospace;">${route.object_count}</span></div>
           <div style="font-size: 10px; color: #B5B3AC;"><b>${tr('Depot', 'Depot', 'Dépôt')}:</b> ${route.depot_name}</div>
           <div style="font-size: 10px; color: #E5B869;"><b>${tr('Expedition', 'Expedition', 'Expédition')}:</b> ${route.expeditions.join(', ')}</div>
           <div style="font-size: 10px; color: #D6D3CB;"><b>${tr('Actors', 'Akteure', 'Acteurs')}:</b> ${route.actors.join(', ') || tr('Unknown', 'Unbekannt', 'Inconnu')}</div>
@@ -298,7 +298,7 @@ export default function GeodataMap({
         <div style="font-family: 'Inter', sans-serif; font-size: 11.5px; padding: 6px 9px; background: #141413; color: #F7F6F2; border: 1px solid ${fillColor}; border-left: 3px solid ${fillColor};">
           <div style="font-weight: 700; color: #FFFFFF;">${orig.name} <span style="font-size:10px;color:#B5B3AC;font-weight:500;">(${tr('Origin', 'Herkunft', 'Origine')})</span></div>
           <div style="font-size: 10px; margin-top: 2px; color: #D6D3CB;"><b>${tr('Region', 'Region', 'Région')}:</b> ${orig.region}</div>
-          <div style="font-size: 10.5px; color: #FCA5A5;"><b>${tr('Looted Heritage', 'Raubkunst', 'Patrimoine pillé')}:</b> <span style="font-family:'Space Mono',monospace;">${orig.object_count}</span></div>
+          <div style="font-size: 10.5px; color: #FCA5A5;"><b>${tr('Looted Heritage', 'Raubkunst', 'Patrimoine pillé')}:</b> <span style="font-family:'IBM Plex Mono',ui-monospace,monospace;">${orig.object_count}</span></div>
           <div style="font-size: 10px; color: #B5B3AC;"><b>${tr('Target Depots', 'Ziel-Depots', 'Dépôts cibles')}:</b> ${orig.depot_ids.length} ${tr('museums in Europe', 'Museen in Europa', 'musées en Europe')}</div>
           <div style="font-size: 10px; color: #E5B869;"><b>${tr('Expeditions', 'Expeditionen', 'Expéditions')}:</b> ${orig.expeditions.slice(0, 3).join(', ')}</div>
           <div style="margin-top: 4px; font-size: 9.5px; color: #7DD3FC; font-weight: 600;">${tr('Click to inspect polity →', 'Klicken zum Isolieren →', 'Cliquer pour isoler →')}</div>
@@ -361,7 +361,7 @@ export default function GeodataMap({
         <div style="font-family: 'Inter', sans-serif; font-size: 11.5px; padding: 7px 10px; background: #141413; color: #F7F6F2; border: 1px solid rgba(255,255,255,0.35);">
           <div style="font-weight: 700; color: #FFFFFF;">${depot.name}</div>
           <div style="font-size: 10px; margin-top: 2px; color: #B5B3AC;"><b>${tr('Location', 'Standort', 'Localisation')}:</b> ${depot.address}</div>
-          <div style="font-size: 10.5px; color: #FCA5A5; font-weight: 600;"><b>${tr('Recorded Objects', 'Kulturgüter', 'Biens culturels')}:</b> <span style="font-family:'Space Mono',monospace;">${depot.object_count.toLocaleString()}</span></div>
+          <div style="font-size: 10.5px; color: #FCA5A5; font-weight: 600;"><b>${tr('Recorded Objects', 'Kulturgüter', 'Biens culturels')}:</b> <span style="font-family:'IBM Plex Mono',ui-monospace,monospace;">${depot.object_count.toLocaleString()}</span></div>
           <div style="font-size: 10px; color: #B5B3AC;"><b>${tr('Origin Polities', 'Herkunftsorte', "Polities d'origine")}:</b> ${depot.origin_ids.length} ${tr('districts', 'Distrikte', 'districts')}</div>
           <div style="margin-top: 4px; font-size: 9.5px; color: #7DD3FC; font-weight: 600;">${tr('Click for museum dossier →', 'Klicken für Museums-Dossier →', 'Cliquer pour le dossier du musée →')}</div>
         </div>
@@ -407,13 +407,13 @@ export default function GeodataMap({
       });
 
       const tooltipContent = `
-        <div style="font-family: 'Space Mono', monospace; font-size: 9px; padding: 4px 6px; background: #000; color: #F59E0B; border: 1px solid #F59E0B; max-width: 280px;">
-          <div style="font-weight: 900;">[${tr('EXPEDITION', 'EXPEDITION', 'EXPÉDITION')} #${ev.num}: ${ev.name}]</div>
-          <div style="font-size: 8px; color: #CBD5E1; margin-top: 2px;"><b>${tr('Period', 'Zeitraum', 'Période')}:</b> ${ev.zeitraum || '1884-1914'}</div>
-          <div style="font-size: 8px; color: #CBD5E1;"><b>${tr('Locations', 'Orte', 'Lieux')}:</b> ${ev.orte || tr('Cameroon', 'Kamerun', 'Cameroun')}</div>
-          <div style="font-size: 8px; color: #F87171;"><b>${tr('Commander', 'Befehlshaber', 'Commandant')}:</b> ${ev.taeter || 'Schutztruppe'}</div>
-          ${ev.zitat ? `<div style="font-size: 8px; color: #94A3B8; font-style: italic; margin-top: 3px;">"${ev.zitat.slice(0, 120)}..."</div>` : ''}
-          ${ev.link ? `<div style="font-size: 7px; color: #38BDF8; margin-top: 3px;">[${tr('BArch primary archive record available', 'BArch Primärbeleg vorhanden', "Source primaire d'archive BArch disponible")}]</div>` : ''}
+        <div style="font-family: 'Inter', sans-serif; font-size: 11px; padding: 6px 9px; background: #141413; color: #F7F6F2; border: 1px solid #D97706; border-left: 3px solid #D97706; max-width: 280px;">
+          <div style="font-weight: 700; color: #FDE68A;"><span style="font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;">#${ev.num}</span> ${ev.name}</div>
+          <div style="font-size: 10px; color: #D6D3CB; margin-top: 2px;"><b>${tr('Period', 'Zeitraum', 'Période')}:</b> <span style="font-family:'IBM Plex Mono',ui-monospace,monospace;">${ev.zeitraum || '1884-1914'}</span></div>
+          <div style="font-size: 10px; color: #D6D3CB;"><b>${tr('Locations', 'Orte', 'Lieux')}:</b> ${ev.orte || tr('Cameroon', 'Kamerun', 'Cameroun')}</div>
+          <div style="font-size: 10px; color: #FCA5A5;"><b>${tr('Commander', 'Befehlshaber', 'Commandant')}:</b> ${ev.taeter || 'Schutztruppe'}</div>
+          ${ev.zitat ? `<div style="font-size: 10px; color: #B5B3AC; font-style: italic; margin-top: 3px;">"${ev.zitat.slice(0, 120)}..."</div>` : ''}
+          ${ev.link ? `<div style="font-size: 9.5px; color: #7DD3FC; margin-top: 3px;">${tr('BArch primary archive record available', 'BArch Primärbeleg vorhanden', "Source primaire d'archive BArch disponible")}</div>` : ''}
         </div>
       `;
       marker.bindTooltip(tooltipContent, { sticky: true, opacity: 0.95 });

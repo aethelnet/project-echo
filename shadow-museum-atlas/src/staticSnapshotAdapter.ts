@@ -489,12 +489,12 @@ function buildDynamicEvidenceHtmlUrl(bundle: StaticBundle, invNumber: string): {
 <meta charset="utf-8" />
 <title>${tr('Forensic Restitution Evidence Sheet', 'Forensisches Restitutions-Beweisblatt', 'Fiche forensique de preuve pour restitution')} — ${invNumber}</title>
 <style>
-  body { font-family: Georgia, serif; max-width: 860px; margin: 40px auto; color: #111; line-height: 1.5; padding: 0 24px; }
-  h1 { font-size: 22px; border-bottom: 2px solid #111; padding-bottom: 8px; text-transform: uppercase; letter-spacing: 0.04em; }
-  .meta { background: #f5f5f4; padding: 14px 18px; border-left: 4px solid #b91c1c; margin: 18px 0; font-family: monospace; font-size: 13px; }
+  body { font-family: 'Source Serif 4', Georgia, serif; max-width: 860px; margin: 40px auto; color: #141413; line-height: 1.5; padding: 0 24px; }
+  h1 { font-size: 22px; border-bottom: 2px solid #141413; padding-bottom: 8px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .meta { background: #F7F6F2; padding: 14px 18px; border-left: 4px solid #991B1B; margin: 18px 0; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 13px; }
   table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 13px; }
-  th, td { border: 1px solid #d6d3d1; padding: 8px 10px; text-align: left; vertical-align: top; }
-  th { background: #1c1917; color: #fafaf9; font-family: monospace; text-transform: uppercase; font-size: 11px; }
+  th, td { border: 1px solid #D8D5CD; padding: 8px 10px; text-align: left; vertical-align: top; }
+  th { background: #141413; color: #F7F6F2; font-family: 'IBM Plex Mono', ui-monospace, monospace; text-transform: uppercase; font-size: 11px; }
   .foot { margin-top: 32px; font-size: 12px; color: #57534e; border-top: 1px solid #d6d3d1; padding-top: 12px; }
 </style>
 </head>
@@ -591,12 +591,12 @@ function buildDynamicBatchHtmlUrl(
 <meta charset="utf-8" />
 <title>${tr('Forensic Batch Dossier', 'Forensisches Sammeldossier', 'Dossier forensique groupé')} — ${entityName}</title>
 <style>
-  body { font-family: Georgia, serif; max-width: 940px; margin: 36px auto; color: #111; line-height: 1.45; padding: 0 24px; }
-  h1 { font-size: 20px; border-bottom: 3px solid #111; padding-bottom: 8px; text-transform: uppercase; }
-  .meta { background: #f5f5f4; padding: 12px 16px; border-left: 4px solid #b91c1c; margin: 16px 0; font-family: monospace; font-size: 12px; }
+  body { font-family: 'Source Serif 4', Georgia, serif; max-width: 940px; margin: 36px auto; color: #141413; line-height: 1.45; padding: 0 24px; }
+  h1 { font-size: 20px; border-bottom: 3px solid #141413; padding-bottom: 8px; text-transform: uppercase; }
+  .meta { background: #F7F6F2; padding: 12px 16px; border-left: 4px solid #991B1B; margin: 16px 0; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 12px; }
   table { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 12px; }
-  th, td { border: 1px solid #d6d3d1; padding: 6px 8px; text-align: left; vertical-align: top; }
-  th { background: #1c1917; color: #fafaf9; font-family: monospace; text-transform: uppercase; font-size: 10px; }
+  th, td { border: 1px solid #D8D5CD; padding: 6px 8px; text-align: left; vertical-align: top; }
+  th { background: #141413; color: #F7F6F2; font-family: 'IBM Plex Mono', ui-monospace, monospace; text-transform: uppercase; font-size: 10px; }
 </style>
 </head>
 <body>

@@ -1,8 +1,8 @@
 /* White Light Brutalism Overrides */
 
 input, button, select, textarea {
-  border-radius: 0 !important;
-  font-family: 'Space Mono', monospace;
+  border-radius: 2px;
+  font-family: var(--font-sans, 'Inter', -apple-system, BlinkMacSystemFont, sans-serif);
 }
 
 input:focus, button:focus, textarea:focus {
