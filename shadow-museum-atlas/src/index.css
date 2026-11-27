@@ -1,24 +1,104 @@
 @import url('/fonts/fonts.css');
 
+:root {
+  --echo-paper: #F7F6F2;
+  --echo-surface: #FFFFFF;
+  --echo-surface-alt: #F1EFEA;
+  --echo-ink: #141413;
+  --echo-ink-muted: #52514C;
+  --echo-ink-subtle: #78766F;
+  --echo-rule: #D8D5CD;
+  --echo-rule-strong: #1C1B19;
+  --echo-crimson: #991B1B;
+  --echo-cobalt: #1E40AF;
+  --echo-ochre: #92400E;
+  --echo-plum: #5B21B6;
+  --echo-teal: #155E75;
+  --echo-sienna: #9A3412;
+  --echo-forest: #166534;
+}
+
+* {
+  box-sizing: border-box;
+}
+
 body {
   margin: 0;
   padding: 0;
-  background-color: #FFFFFF;
-  color: #000000;
-  font-family: 'Space Mono', monospace;
+  background-color: var(--echo-paper);
+  color: var(--echo-ink);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 13px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
   overflow: hidden;
 }
 
 h1, h2, h3, h4, h5, h6 {
-  font-family: 'Inter', sans-serif;
-  text-transform: uppercase;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  letter-spacing: -0.015em;
+  color: var(--echo-ink);
 }
 
+button, input, select, textarea {
+  font-family: inherit;
+}
+
+.mono {
+  font-family: 'Space Mono', ui-monospace, SFMono-Regular, monospace !important;
+}
+
+/* Archival framing (replaces heavy neo-brutalist offset blocks) */
+.archival-card,
 .brutalist-border {
-  border: 4px solid #000000;
-  border-radius: 0;
-  box-shadow: 6px 6px 0px #000000;
-  background: #FFFFFF;
+  border: 1px solid var(--echo-rule);
+  border-radius: 2px;
+  box-shadow: none;
+  background: var(--echo-surface);
+}
+
+.archival-card-strong {
+  border: 1px solid var(--echo-rule-strong);
+  border-radius: 2px;
+  background: var(--echo-surface);
+}
+
+.archival-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border: 1px solid var(--echo-rule);
+  border-radius: 2px;
+  background: var(--echo-surface);
+  color: var(--echo-ink);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+  white-space: nowrap;
+}
+
+.archival-btn:hover:not(:disabled) {
+  background: var(--echo-surface-alt);
+  border-color: var(--echo-ink);
+}
+
+.archival-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.archival-btn-primary {
+  background: var(--echo-ink);
+  color: #FFFFFF;
+  border-color: var(--echo-ink);
+}
+
+.archival-btn-primary:hover:not(:disabled) {
+  background: #2C2B28;
+  border-color: #2C2B28;
 }
 
 .ui-overlay {
@@ -31,9 +111,150 @@ h1, h2, h3, h4, h5, h6 {
   pointer-events: auto;
 }
 
+/* ========================================================= */
+/* WORKBENCH VIEWS: VISUAL FORENSICS & DOCUMENTS             */
+/* ========================================================= */
+.vf-view,
+.docs-view {
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background-color: var(--echo-paper);
+  padding: 18px 20px 68px 20px;
+  box-sizing: border-box;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  -webkit-overflow-scrolling: touch;
+}
+
+.vf-grid {
+  display: grid;
+  grid-template-columns: minmax(300px, 375px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.docs-grid {
+  display: grid;
+  grid-template-columns: minmax(300px, 390px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.vf-view canvas {
+  display: block;
+  max-width: 100%;
+  touch-action: pan-y !important;
+}
 
 /* ========================================================= */
-/* MOBILE RESPONSIVENESS & TOUCH PHYSICS (UNIT 734 PATCH)    */
+/* GEODATA MAP HUDs & LEGAL WIDGET SAFE SPACING              */
+/* ========================================================= */
+.geo-hud-left {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: calc(100% - 340px);
+}
+
+.geo-hud-cam-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  background-color: rgba(20, 20, 19, 0.92);
+  padding: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 2px;
+  backdrop-filter: blur(6px);
+}
+
+.geo-hud-right {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 20;
+  background-color: rgba(20, 20, 19, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 2px;
+  padding: 10px 13px;
+  color: #F7F6F2;
+  font-family: 'Inter', sans-serif;
+  font-size: 11px;
+  max-width: 305px;
+  backdrop-filter: blur(6px);
+}
+
+.geo-legend {
+  position: absolute;
+  bottom: 14px;
+  left: 14px;
+  z-index: 20;
+  background-color: rgba(20, 20, 19, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 2px;
+  padding: 7px 13px;
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  flex-wrap: wrap;
+  font-family: 'Inter', sans-serif;
+  font-size: 10.5px;
+  color: #E7E5E0;
+  max-width: calc(100% - 170px);
+  backdrop-filter: blur(6px);
+}
+
+/* Keep Leaflet Zoom above the fixed bottom-right Legal Notice button */
+.leaflet-bottom.leaflet-right {
+  margin-bottom: 40px !important;
+}
+
+.leaflet-bar {
+  border: 1px solid rgba(255, 255, 255, 0.25) !important;
+  border-radius: 2px !important;
+  box-shadow: none !important;
+}
+
+.leaflet-bar a {
+  background-color: rgba(20, 20, 19, 0.92) !important;
+  color: #F7F6F2 !important;
+  border-bottom-color: rgba(255, 255, 255, 0.16) !important;
+}
+
+.leaflet-bar a:hover {
+  background-color: #2C2B28 !important;
+}
+
+/* Keep bottom content in Inspector clear of Legal Notice button */
+.inspector-aside {
+  padding-bottom: 68px !important;
+}
+
+/* Subtle archival scrollbars */
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #C9C5BB;
+  border-radius: 2px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #9E9A90;
+}
+
+/* ========================================================= */
+/* HEADER & RESPONSIVE LAYOUT                                */
 /* ========================================================= */
 .desktop-header {
   display: flex !important;
@@ -45,6 +266,33 @@ h1, h2, h3, h4, h5, h6 {
   display: none !important;
 }
 
+.mobile-sidebar-backdrop {
+  display: none;
+}
+
+/* Compact Laptop Breakpoint (901px - 1340px) */
+@media (max-width: 1340px) {
+  .brand-subtitle {
+    display: none !important;
+  }
+  .desktop-search-box {
+    width: 175px !important;
+  }
+}
+
+@media (max-width: 1060px) {
+  .inspector-aside {
+    width: 370px !important;
+  }
+}
+
+@media (max-width: 960px) {
+  .vf-grid,
+  .docs-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+
 @media (max-width: 900px) {
   .desktop-header {
     display: none !important;
@@ -54,45 +302,94 @@ h1, h2, h3, h4, h5, h6 {
     flex-direction: column !important;
     width: 100% !important;
   }
-  
+
   .app-workspace {
     flex-direction: column !important;
   }
-  
+
   .left-sidebar {
     display: none !important;
   }
-  
-  .main-canvas {
-    width: 100vw !important;
-    height: 100% !important;
-    flex: none !important;
+
+  .left-sidebar.mobile-open {
+    display: flex !important;
+    position: fixed !important;
+    top: 46px !important;
+    left: 0 !important;
+    width: min(88vw, 340px) !important;
+    height: calc(100dvh - 46px) !important;
+    z-index: 950 !important;
+    box-shadow: 0 12px 32px rgba(20, 20, 19, 0.28) !important;
   }
-  
-  .inspector-aside, aside[style*="borderLeft"], aside[style*="border-left"] {
+
+  .mobile-sidebar-backdrop {
+    display: block;
+    position: fixed;
+    inset: 46px 0 0 0;
+    background-color: rgba(20, 20, 19, 0.42);
+    z-index: 940;
+  }
+
+  .main-canvas {
+    width: 100% !important;
+    height: 100% !important;
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+  }
+
+  .inspector-aside,
+  aside[style*="borderLeft"],
+  aside[style*="border-left"] {
     position: fixed !important;
     bottom: 0 !important;
     left: 0 !important;
     width: 100% !important;
-    height: 65vh !important;
+    height: 68vh !important;
     border-left: none !important;
-    border-top: 4px solid #000000 !important;
+    border-top: 2px solid var(--echo-ink) !important;
     z-index: 1000 !important;
-    box-shadow: 0px -6px 20px rgba(0,0,0,0.35) !important;
-    background-color: #FFFFFF !important;
+    box-shadow: 0 -10px 30px rgba(20, 20, 19, 0.22) !important;
+    background-color: var(--echo-surface) !important;
+    padding: 16px 16px 68px 16px !important;
   }
 
-  /* HUD Collapse: Hide the floating legends */
+  /* Graph HUD Collapse on tiny phones */
   .ui-overlay {
     display: none !important;
   }
 
-  /* Touch Physics */
-  canvas {
-    touch-action: none !important; /* Verhindert Scrollen beim Pan/Zoom */
+  /* Responsive Geo-Map HUDs: Zero collisions on tablets & smartphones */
+  .geo-hud-left {
+    top: 8px;
+    left: 8px;
+    right: 8px;
+    max-width: none;
   }
-  
-  /* Leaflet Map Touch Physics */
+
+  .geo-hud-right {
+    top: auto;
+    bottom: 46px;
+    left: 8px;
+    right: 54px;
+    max-width: none;
+    padding: 7px 10px;
+    font-size: 9.5px;
+  }
+
+  .geo-legend {
+    display: none !important;
+  }
+
+  .vf-view,
+  .docs-view {
+    padding: 12px 12px 68px 12px;
+  }
+
+  /* Lock touch pan/zoom ONLY on the interactive force graph canvas & Leaflet map */
+  .graph-canvas-wrap canvas {
+    touch-action: none !important;
+  }
+
   .leaflet-container {
     touch-action: none !important;
   }

@@ -3,10 +3,14 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import ForceGraph2D from 'react-force-graph-2d';
 import GeodataMap from './GeodataMap';
 import VisualForensicsView from './VisualForensicsView';
+import DocumentsView from './DocumentsView';
+import { isStaticSnapshotMode } from './staticSnapshotAdapter';
+import { useLang, relLabel, nodeTypeLabel, localizePoiDesc } from './i18n';
 
 type MetricFilter = null | 'subjekte' | 'raub' | 'schenkung' | 'dissonanz' | 'verdacht' | 'akteure' | 'depots' | 'luecken';
 
 export default function App() {
+  const { lang, setLang, cycleLang, t } = useLang();
   const fgRef = useRef<any>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const canvasContainerRef = useRef<HTMLDivElement>(null);
@@ -23,8 +27,8 @@ export default function App() {
   const [hoveredLink, setHoveredLink] = useState<any>(null);
   const [searchTerm, setSearchTerm] = useState('');
   
-  // View Mode: 'graph' | 'map' | 'visual'
-  const [viewMode, setViewMode] = useState<'graph' | 'map' | 'visual'>('graph');
+  // View Mode: 'graph' | 'map' | 'visual' | 'docs'
+  const [viewMode, setViewMode] = useState<'graph' | 'map' | 'visual' | 'docs'>('graph');
   const [selectedRoute, setSelectedRoute] = useState<any | null>(null);
 
   // Interactive Metric Toggle (Oben Links)
@@ -34,8 +38,9 @@ export default function App() {
   const [ghostMode, setGhostMode] = useState(false);
   const [ghostIds, setGhostIds] = useState<Set<string>>(new Set());
 
-  // Mobile Navigation Drawer State
+  // Mobile Navigation & Entity Sidebar Drawers
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   // Contested Mode (Multigraph Kollisionen: Schenkung vs. Raub)
   const [contestedIds, setContestedIds] = useState<Set<string>>(new Set());
@@ -128,13 +133,13 @@ export default function App() {
       const exists = prev.some(p => p.id === nodeObj.id);
       const next = exists
         ? prev.filter(p => p.id !== nodeObj.id)
-        : [{ id: nodeObj.id, label: nodeObj.label || nodeObj.id, desc: nodeObj.desc || 'Fokus-Leitobjekt' }, ...prev];
+        : [{ id: nodeObj.id, label: nodeObj.label || nodeObj.id, desc: nodeObj.desc || t('Key Restitution Object', 'Fokus-Leitobjekt', 'Objet phare de restitution') }, ...prev];
       try {
         localStorage.setItem('echo_pinned_pois', JSON.stringify(next));
       } catch (_e) {}
       return next;
     });
-  }, []);
+  }, [t]);
 
   // User Annotations State (Marianne / Richard Kuration)
   const [annotations, setAnnotations] = useState<any[]>([]);
@@ -178,10 +183,10 @@ export default function App() {
         setShowLoginModal(false);
         setLoginPassword('');
       } else {
-        setLoginError(data.detail || 'Ungültiges Passwort.');
+        setLoginError(data.detail || t('Invalid password.', 'Ungültiges Passwort.', 'Mot de passe invalide.'));
       }
     } catch (err: any) {
-      setLoginError('Verbindungsfehler zum Auth-Gateway.');
+      setLoginError(t('Connection error to auth gateway.', 'Verbindungsfehler zum Auth-Gateway.', "Erreur de connexion à la passerelle d'authentification."));
     } finally {
       setIsLoggingIn(false);
     }
@@ -192,18 +197,53 @@ export default function App() {
     setIsResearcher(false);
   };
 
+  const handleSandboxLogin = () => {
+    localStorage.setItem('echo_researcher_token', 'echo-static-sandbox');
+    setIsResearcher(true);
+    setShowLoginModal(false);
+    setLoginError(null);
+    setLoginPassword('');
+  };
+
+  const loadStats = useCallback(() => {
+    fetch('/api/stats')
+      .then(res => res.json())
+      .then(data => {
+        if (data.success) {
+          setStats({
+            subjekte: data.subjekte || data.objekte || 0,
+            akteure: data.akteure || 0,
+            institutionen: data.institutionen || 0,
+            publikationen: data.publikationen || 0,
+            raub_kanten: data.raub_kanten || 0,
+            schenk_kanten: data.schenk_kanten || 0,
+            verdacht_kanten: data.verdacht_kanten || 0,
+            gesamt_kanten: data.gesamt_kanten || 0,
+            contested_objekte: data.contested_objekte || 0,
+            provenienz_luecken: data.provenienz_luecken || 0
+          });
+        }
+      })
+      .catch(err => console.error("Stats Fetch Error:", err));
+  }, []);
+
   // 1. Publikationen laden
-  const loadPublications = useCallback(() => {
+  const loadPublications = useCallback((autoSelectPubId?: string) => {
     fetch('/api/publications')
       .then(res => res.json())
       .then(data => {
         if (data.success && data.publications) {
+          const validIds = new Set<string>(data.publications.map((p: any) => p.id));
           setPublications(data.publications);
           setSelectedPubs(prev => {
             if (prev.size === 0) {
-              return new Set<string>(data.publications.map((p: any) => p.id));
+              return new Set<string>(validIds);
             }
-            return prev;
+            const next = new Set<string>(Array.from(prev).filter((id) => validIds.has(id)));
+            if (autoSelectPubId && validIds.has(autoSelectPubId)) {
+              next.add(autoSelectPubId);
+            }
+            return next.size > 0 ? next : new Set<string>(validIds);
           });
         }
       })
@@ -320,13 +360,13 @@ export default function App() {
             }
           }, 120);
         } else {
-          setError("Fehler beim Laden des Beweisgraphen.");
+          setError(t('Error loading provenance graph.', 'Fehler beim Laden des Beweisgraphen.', 'Erreur lors du chargement du graphe de provenance.'));
         }
         setLoading(false);
       })
       .catch(err => {
         console.error("Graph Fetch Error:", err);
-        setError("Verbindung zur Graph-API fehlgeschlagen (Port 8088 / Neo4j).");
+        setError(t('Connection to Graph API failed (Port 8088 / Neo4j).', 'Verbindung zur Graph-API fehlgeschlagen (Port 8088 / Neo4j).', "Échec de connexion à l'API Graphe (Port 8088 / Neo4j)."));
         setLoading(false);
       });
   }, [selectedPubs, publications, exclusiveCypherMode, focusedEntity]);
@@ -512,7 +552,11 @@ export default function App() {
   // 4. Publikation Toggle
   
   const handleDeletePublication = (pubId: string) => {
-    if (!window.confirm("Bist du sicher? Die Ingestion wird restlos aus dem Graphen entfernt.")) return;
+    if (!window.confirm(t(
+      'Are you sure? This publication ingestion will be permanently removed from the graph.',
+      'Bist du sicher? Die Ingestion wird restlos aus dem Graphen entfernt.',
+      'Êtes-vous sûr ? Cette ingestion de publication sera définitivement supprimée du graphe.'
+    ))) return;
     
     fetch(`/api/publications/${pubId}`, { 
       method: 'DELETE',
@@ -521,15 +565,19 @@ export default function App() {
       .then(async res => {
         if (res.status === 401) {
           setShowLoginModal(true);
-          setLoginError("Forscher-Autorisierung erforderlich (Marianne).");
+          setLoginError(t('Researcher authorization required.', 'Forscher-Autorisierung erforderlich (Marianne).', 'Autorisation chercheur requise.'));
           return;
         }
         const data = await res.json();
         if (data.success) {
-          alert(data.message);
-          window.location.reload(); // Hard reload um D3 Graph zu refreshen
+          loadPublications();
+          loadFilterEntities();
+          loadStats();
+          const remaining = new Set(Array.from(selectedPubs).filter((id) => id !== pubId));
+          setSelectedPubs(remaining);
+          loadGraph(remaining);
         } else {
-          alert("Fehler: " + (data.detail || "Löschen fehlgeschlagen"));
+          alert(t('Error: ', 'Fehler: ', 'Erreur : ') + (data.detail || t('Deletion failed', 'Löschen fehlgeschlagen', 'Échec de la suppression')));
         }
       })
       .catch(err => console.error("Fehler beim Loeschen:", err));
@@ -549,7 +597,11 @@ export default function App() {
   // 4.01 Batch Dossier ZIP Handler
   const handleBatchDossier = (entityType: 'actor' | 'institution' | 'gaps' | 'list', entityName: string, explicitInvs?: string[]) => {
     setIsGeneratingBatch(true);
-    setBatchStatus(`[START: BÜNDLE DOSSIERS FÜR ${entityName.toUpperCase()}...]`);
+    setBatchStatus(t(
+      `[START: PACKAGING DOSSIERS FOR ${entityName.toUpperCase()}...]`,
+      `[START: BÜNDLE DOSSIERS FÜR ${entityName.toUpperCase()}...]`,
+      `[DÉBUT : COMPILATION DES DOSSIERS POUR ${entityName.toUpperCase()}...]`
+    ));
 
     fetch('/api/dossier/batch', {
       method: 'POST',
@@ -562,12 +614,16 @@ export default function App() {
       })
     })
       .then(res => {
-        if (!res.ok) throw new Error("Batch-Export fehlgeschlagen");
+        if (!res.ok) throw new Error(t('Batch export failed', 'Batch-Export fehlgeschlagen', "Échec de l'export groupé"));
         return res.json();
       })
       .then(data => {
         if (data.success && data.download_url) {
-          setBatchStatus(`[FERTIG: ${data.dossiers_packaged} DOSSIERS IN ${data.filename} GEPACKT - DOWNLOAD STARTET]`);
+          setBatchStatus(t(
+            `[DONE: ${data.dossiers_packaged} DOSSIERS PACKAGED IN ${data.filename} - STARTING DOWNLOAD]`,
+            `[FERTIG: ${data.dossiers_packaged} DOSSIERS IN ${data.filename} GEPACKT - DOWNLOAD STARTET]`,
+            `[TERMINÉ : ${data.dossiers_packaged} DOSSIERS COMPILÉS DANS ${data.filename} - TÉLÉCHARGEMENT]`
+          ));
           const link = document.createElement('a');
           link.href = data.download_url;
           link.download = data.filename;
@@ -579,13 +635,17 @@ export default function App() {
             setBatchStatus(null);
           }, 4000);
         } else {
-          setBatchStatus(`[FEHLER: ${data.detail || "Export abgebrochen"}]`);
+          setBatchStatus(t(
+            `[ERROR: ${data.detail || 'Export aborted'}]`,
+            `[FEHLER: ${data.detail || 'Export abgebrochen'}]`,
+            `[ERREUR : ${data.detail || 'Export annulé'}]`
+          ));
           setIsGeneratingBatch(false);
         }
       })
       .catch(err => {
         console.error(err);
-        setBatchStatus("[FEHLER BEIM BATCH-EXPORT]");
+        setBatchStatus(t('[BATCH EXPORT ERROR]', '[FEHLER BEIM BATCH-EXPORT]', "[ERREUR D'EXPORT GROUPÉ]"));
         setIsGeneratingBatch(false);
       });
   };
@@ -593,7 +653,11 @@ export default function App() {
   // 4.02 Diplomatische HLKO Restitutions-Pipeline (Asynchrones Polling)
   const handleGenerateLLMPetition = (institutionName: string) => {
     setIsGeneratingPetition(true);
-    setPetitionStatus('[INITIALISIERE FORENSISCHE RESTITUTIONS-TRIAGE...]');
+    setPetitionStatus(t(
+      '[INITIALIZING FORENSIC RESTITUTION TRIAGE...]',
+      '[INITIALISIERE FORENSISCHE RESTITUTIONS-TRIAGE...]',
+      '[INITIALISATION DU TRIAGE FORENSIQUE DE RESTITUTION...]'
+    ));
     setPetitionDownloadUrl(null);
 
     fetch('/api/petition/generate_llm', {
@@ -605,15 +669,19 @@ export default function App() {
       })
     })
       .then(res => {
-        if (!res.ok) throw new Error("Restitutions-Request fehlgeschlagen");
+        if (!res.ok) throw new Error(t('Restitution request failed', 'Restitutions-Request fehlgeschlagen', 'Échec de la requête de restitution'));
         return res.json();
       })
       .then(data => {
         if (!data.success || !data.job_id) {
-          throw new Error(data.message || "Fehler beim Anstoßen des Auftrags");
+          throw new Error(data.message || t('Failed to start job', 'Fehler beim Anstoßen des Auftrags', 'Impossible de démarrer la tâche'));
         }
         setPetitionJobId(data.job_id);
-        setPetitionStatus(`[IN ARBEIT: ${data.step || 'Subsumtion läuft...'}]`);
+        setPetitionStatus(t(
+          `[RUNNING: ${data.step || 'Legal subsumption in progress...'}]`,
+          `[IN ARBEIT: ${data.step || 'Subsumtion läuft...'}]`,
+          `[EN COURS : ${data.step || 'Qualification juridique en cours...'}]`
+        ));
 
         // Polling alle 2,5 Sekunden
         const pollInterval = setInterval(() => {
@@ -623,7 +691,11 @@ export default function App() {
               if (sData.status === 'completed') {
                 clearInterval(pollInterval);
                 const dlUrl = sData.result?.download_zip_url || `/api/dossier/download/${sData.result?.zip_filename}`;
-                setPetitionStatus(`[FERTIG: ${sData.result?.counts?.total_extracted || 0} OBJEKTE VÖLKERRECHTLICH SUBSUMIERT & VERSIEGELT]`);
+                setPetitionStatus(t(
+                  `[DONE: ${sData.result?.counts?.total_extracted || 0} OBJECTS SUBSUMED UNDER INTERNATIONAL LAW & SEALED]`,
+                  `[FERTIG: ${sData.result?.counts?.total_extracted || 0} OBJEKTE VÖLKERRECHTLICH SUBSUMIERT & VERSIEGELT]`,
+                  `[TERMINÉ : ${sData.result?.counts?.total_extracted || 0} OBJETS QUALIFIÉS EN DROIT INTERNATIONAL ET SCELLÉS]`
+                ));
                 setPetitionDownloadUrl(dlUrl);
                 setIsGeneratingPetition(false);
 
@@ -631,42 +703,75 @@ export default function App() {
                 if (dlUrl) {
                   const link = document.createElement('a');
                   link.href = dlUrl;
-                  link.download = sData.result?.zip_filename || 'Restitutionspaket.zip';
+                  link.download = sData.result?.zip_filename || t('Restitution_Package.zip', 'Restitutionspaket.zip', 'Dossier_Restitution.zip');
                   document.body.appendChild(link);
                   link.click();
                   document.body.removeChild(link);
                 }
               } else if (sData.status === 'failed') {
                 clearInterval(pollInterval);
-                setPetitionStatus(`[FEHLER: ${sData.error || 'Generierung fehlgeschlagen'}]`);
+                setPetitionStatus(t(
+                  `[ERROR: ${sData.error || 'Generation failed'}]`,
+                  `[FEHLER: ${sData.error || 'Generierung fehlgeschlagen'}]`,
+                  `[ERREUR : ${sData.error || 'Échec de la génération'}]`
+                ));
                 setIsGeneratingPetition(false);
               } else {
-                setPetitionStatus(`[STATUS: ${sData.step || 'Analysiere Graphendaten...'}]`);
+                setPetitionStatus(t(
+                  `[STATUS: ${sData.step || 'Analyzing graph data...'}]`,
+                  `[STATUS: ${sData.step || 'Analysiere Graphendaten...'}]`,
+                  `[STATUT : ${sData.step || 'Analyse du graphe en cours...'}]`
+                ));
               }
             })
             .catch(err => {
               console.error(err);
               clearInterval(pollInterval);
-              setPetitionStatus('[FEHLER BEIM STATUS-POLLING]');
+              setPetitionStatus(t('[STATUS POLLING ERROR]', '[FEHLER BEIM STATUS-POLLING]', '[ERREUR DE SUIVI DE STATUT]'));
               setIsGeneratingPetition(false);
             });
         }, 2500);
       })
       .catch(err => {
         console.error(err);
-        setPetitionStatus(`[FEHLER: ${err.message || 'Verbindung zum API-Backend fehlgeschlagen'}]`);
+        setPetitionStatus(t(
+          `[ERROR: ${err.message || 'API backend connection failed'}]`,
+          `[FEHLER: ${err.message || 'Verbindung zum API-Backend fehlgeschlagen'}]`,
+          `[ERREUR : ${err.message || "Échec de connexion au serveur API"}]`
+        ));
         setIsGeneratingPetition(false);
       });
   };
 
-  // 4.03 IFG-Auskunftsersuchen in Zwischenablage kopieren
+  // 4.03 IFG / FOIA / CADA-Auskunftsersuchen in Zwischenablage kopieren
   const handleCopyIFG = (invNumber: string, museum: string) => {
-    const text = `Antrag nach dem Informationsfreiheitsgesetz (IFG) / Landesinformationsfreiheitsgesetz\n\nBetreff: Auskunftsersuchen zu den historischen Zugangsbüchern (1884–1916) für Inventarnummer ${invNumber}\nEmpfänger: Direktion / Provenienzforschung ${museum}\n\nSehr geehrte Damen und Herren,\n\nim Rahmen unabhängiger Provenienzrecherchen zur kolonialen Herkunft von Kulturgütern aus Kamerun beantrage ich hiermit Einsicht in die physischen bzw. digitalisierten Zugangsbücher, Inventarlisten und Akten der Jahre 1884 bis 1916 für die Inventarnummer ${invNumber}.\n\nDa in den aktuellen Bestandsdaten keinerlei historischer Erwerbsakt dokumentiert ist, ist die Einsicht in die Primärquellen zur Rekonstruktion der lückenlosen Beweiskette (Chain of Custody) zwingend erforderlich.\n\nMit freundlichen Grüßen,\nMarianne (Project Echo Provenienz-Forensik)`;
-    if (navigator.clipboard) {
+    const text = lang === 'de'
+      ? `Antrag nach dem Informationsfreiheitsgesetz (IFG) / Landesinformationsfreiheitsgesetz\n\nBetreff: Auskunftsersuchen zu den historischen Zugangsbüchern (1884–1916) für Inventarnummer ${invNumber}\nEmpfänger: Direktion / Provenienzforschung ${museum}\n\nSehr geehrte Damen und Herren,\n\nim Rahmen unabhängiger Provenienzrecherchen zur kolonialen Herkunft von Kulturgütern aus Kamerun beantrage ich hiermit Einsicht in die physischen bzw. digitalisierten Zugangsbücher, Inventarlisten und Akten der Jahre 1884 bis 1916 für die Inventarnummer ${invNumber}.\n\nDa in den aktuellen Bestandsdaten keinerlei historischer Erwerbsakt dokumentiert ist, ist die Einsicht in die Primärquellen zur Rekonstruktion der lückenlosen Beweiskette (Chain of Custody) zwingend erforderlich.\n\nMit freundlichen Grüßen,\nProject Echo Provenienz-Forensik`
+      : lang === 'fr'
+        ? `Demande d'accès aux documents administratifs et archives (IFG / CADA / Accès aux registres d'entrée)\n\nObjet : Demande de consultation des registres d'entrée historiques (1884–1916) pour le numéro d'inventaire ${invNumber}\nDestinataire : Direction / Département de recherche de provenance, ${museum}\n\nMadame, Monsieur,\n\nDans le cadre de recherches indépendantes de provenance portant sur l'origine coloniale de biens culturels issus du Cameroun, je sollicite par la présente l'accès aux registres d'entrée physiques ou numérisés, listes d'inventaire et dossiers d'archives des années 1884 à 1916 concernant le numéro d'inventaire ${invNumber}.\n\nLes données publiques actuelles ne documentant aucun acte d'acquisition historique, la consultation des sources primaires est indispensable afin de reconstituer la chaîne de provenance (Chain of Custody).\n\nVeuillez agréer mes salutations distinguées,\nProject Echo — Forensique de provenance`
+        : `Freedom of Information Request (German IFG / State Freedom of Information Act)\n\nSubject: Request for Access to Historical Accession Ledgers (1884–1916) for Inventory Number ${invNumber}\nRecipient: Directorate / Provenance Research Department, ${museum}\n\nDear Sir or Madam,\n\nIn the context of independent provenance research into the colonial origin of cultural heritage objects from Cameroon, I hereby request access to the physical or digitized accession ledgers, inventory lists, and archival files from 1884 to 1916 pertaining to inventory number ${invNumber}.\n\nBecause the publicly available collection records contain no documented acquisition act, access to the primary archival sources is essential to reconstruct a complete chain of custody.\n\nSincerely,\nProject Echo Provenance Forensics`;
+    const fallbackCopy = () => {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        setCopySuccess(true);
+        setTimeout(() => setCopySuccess(false), 3000);
+      } catch (_err) {}
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(text).then(() => {
         setCopySuccess(true);
         setTimeout(() => setCopySuccess(false), 3000);
-      });
+      }).catch(fallbackCopy);
+    } else {
+      fallbackCopy();
     }
   };
 
@@ -790,6 +895,10 @@ export default function App() {
 
     setFocusedEntity({ type, name });
     setSelectedLink(null);
+    setMobileSidebarOpen(false);
+    if (viewMode === 'visual' || viewMode === 'docs') {
+      setViewMode('graph');
+    }
 
     const endpoint = type === 'actor' 
       ? `/api/actors/${encodeURIComponent(name)}/summary` 
@@ -890,7 +999,11 @@ export default function App() {
   }, [getAuthHeaders]);
 
   const handleResetLayout = () => {
-    if (!window.confirm("Manuelle Knoten-Verschiebungen zuruecksetzen und geordnetes Konstellations-Layout wiederherstellen?")) return;
+    if (!window.confirm(t(
+      'Reset manual node positions and restore ordered constellation layout?',
+      'Manuelle Knoten-Verschiebungen zuruecksetzen und geordnetes Konstellations-Layout wiederherstellen?',
+      'Réinitialiser les positions manuelles des nœuds et restaurer la constellation ordonnée ?'
+    ))) return;
     localStorage.removeItem('echo_guest_layout');
     if (!localStorage.getItem('echo_researcher_token')) {
       window.location.reload();
@@ -924,20 +1037,26 @@ export default function App() {
     }).then(async r => {
        if (r.status === 401) {
          setShowLoginModal(true);
-         setLoginError("Forscher-Autorisierung erforderlich (Marianne).");
+         setLoginError(t('Researcher authorization required.', 'Forscher-Autorisierung erforderlich (Marianne).', 'Autorisation chercheur requise.'));
          return;
        }
-       if (r.ok) { window.location.reload(); }
+       if (r.ok) {
+         setNewEdgeTarget('');
+         setNewEdgeBeleg('');
+         loadStats();
+         loadFilterEntities();
+         loadGraph();
+       }
        else { 
          const j = await r.json();
-         alert("Fehler: " + (j.detail || "Source/Target ungültig")); 
+         alert(t('Error: ', 'Fehler: ', 'Erreur : ') + (j.detail || t('Invalid source/target', 'Source/Target ungültig', 'Source/cible invalide'))); 
        }
     });
   };
 
   const handleDeleteEdge = () => {
     if (!selectedLink) return;
-    if (!window.confirm("Relation wirklich restlos löschen?")) return;
+    if (!window.confirm(t('Permanently delete this relation?', 'Relation wirklich restlos löschen?', 'Supprimer définitivement cette relation ?'))) return;
     const sId = typeof selectedLink.source === 'object' ? selectedLink.source.id : selectedLink.source;
     const tId = typeof selectedLink.target === 'object' ? selectedLink.target.id : selectedLink.target;
     
@@ -955,10 +1074,15 @@ export default function App() {
     }).then(async r => {
       if (r.status === 401) {
         setShowLoginModal(true);
-        setLoginError("Forscher-Autorisierung erforderlich (Marianne).");
+        setLoginError(t('Researcher authorization required.', 'Forscher-Autorisierung erforderlich (Marianne).', 'Autorisation chercheur requise.'));
         return;
       }
-      if (r.ok) { window.location.reload(); }
+      if (r.ok) {
+        setSelectedLink(null);
+        loadStats();
+        loadFilterEntities();
+        loadGraph();
+      }
     });
   };
 
@@ -968,7 +1092,11 @@ export default function App() {
 
     const file = files[0];
     setIsUploading(true);
-    setUploadMessage(`[INGESTION: ANALYSIERE ${file.name.toUpperCase()}...]`);
+    setUploadMessage(t(
+      `[INGESTION: ANALYZING ${file.name.toUpperCase()}...]`,
+      `[INGESTION: ANALYSIERE ${file.name.toUpperCase()}...]`,
+      `[INGESTION : ANALYSE DE ${file.name.toUpperCase()}...]`
+    ));
 
     const formData = new FormData();
     formData.append("file", file);
@@ -983,32 +1111,42 @@ export default function App() {
       .then(async res => {
         if (res.status === 401) {
           setShowLoginModal(true);
-          setLoginError("Forscher-Autorisierung erforderlich (Marianne).");
-          setUploadMessage("[401: AUTORISIERUNG ERFORDERLICH]");
+          setLoginError(t('Researcher authorization required.', 'Forscher-Autorisierung erforderlich (Marianne).', 'Autorisation chercheur requise.'));
+          setUploadMessage(t('[401: AUTHORIZATION REQUIRED]', '[401: AUTORISIERUNG ERFORDERLICH]', '[401 : AUTORISATION REQUISE]'));
           setIsUploading(false);
           return null;
         }
-        if (!res.ok) throw new Error("Upload fehlgeschlagen");
+        if (!res.ok) throw new Error(t('Upload failed', 'Upload fehlgeschlagen', 'Échec du téléversement'));
         return res.json();
       })
       .then(data => {
         if (!data) return;
         if (data.success) {
-          setUploadMessage(`[ERFOLG: ${data.triples_extracted} RELATIONEN AUS ${file.name.toUpperCase()} INJIZIERT]`);
-          loadPublications();
+          setUploadMessage(t(
+            `[SUCCESS: ${data.triples_extracted} RELATIONS INJECTED FROM ${file.name.toUpperCase()}]`,
+            `[ERFOLG: ${data.triples_extracted} RELATIONEN AUS ${file.name.toUpperCase()} INJIZIERT]`,
+            `[SUCCÈS : ${data.triples_extracted} RELATIONS INJECTÉES DEPUIS ${file.name.toUpperCase()}]`
+          ));
+          loadPublications(data.publication_id);
+          loadStats();
+          loadFilterEntities();
           setTimeout(() => {
             loadGraph();
             setIsUploading(false);
-          }, 1000);
+          }, 500);
           setTimeout(() => setUploadMessage(null), 5000);
         } else {
-          setUploadMessage(`[FEHLER: ${data.detail || "Verarbeitung abgebrochen"}]`);
+          setUploadMessage(t(
+            `[ERROR: ${data.detail || 'Processing aborted'}]`,
+            `[FEHLER: ${data.detail || 'Verarbeitung abgebrochen'}]`,
+            `[ERREUR : ${data.detail || 'Traitement interrompu'}]`
+          ));
           setIsUploading(false);
         }
       })
       .catch(err => {
         console.error(err);
-        setUploadMessage("[FEHLER: DATEI-INGESTION FEHLGESCHLAGEN]");
+        setUploadMessage(t('[ERROR: FILE INGESTION FAILED]', '[FEHLER: DATEI-INGESTION FEHLGESCHLAGEN]', "[ERREUR : ÉCHEC DE L'INGESTION DU FICHIER]"));
         setIsUploading(false);
       });
   };
@@ -1017,7 +1155,7 @@ export default function App() {
   const handlePrintDossier = (invNumber: string) => {
     if (!invNumber) return;
     setIsGeneratingDossier(true);
-    setDossierStatus("[BEWEISKETTE WIRD EXTRAHIERT...]");
+    setDossierStatus(t('[EXTRACTING CHAIN OF EVIDENCE...]', '[BEWEISKETTE WIRD EXTRAHIERT...]', '[EXTRACTION DE LA CHAÎNE DE PREUVE...]'));
 
     fetch('/api/dossier/generate', {
       method: 'POST',
@@ -1025,15 +1163,15 @@ export default function App() {
       body: JSON.stringify({ inventarnummer: invNumber })
     })
       .then(res => {
-        if (!res.ok) throw new Error("Dossier konnte nicht generiert werden.");
+        if (!res.ok) throw new Error(t('Could not generate dossier.', 'Dossier konnte nicht generiert werden.', 'Impossible de générer le dossier.'));
         return res.json();
       })
       .then(data => {
         if (data.success && data.download_url) {
-          setDossierStatus("[PDF ERSTELLT - DOWNLOAD STARTET]");
+          setDossierStatus(t('[PDF READY - STARTING DOWNLOAD]', '[PDF ERSTELLT - DOWNLOAD STARTET]', '[PDF PRÊT - TÉLÉCHARGEMENT EN COURS]'));
           const link = document.createElement('a');
           link.href = data.download_url;
-          link.download = data.filename || `Restitutionsdossier_${invNumber}.pdf`;
+          link.download = data.filename || `${t('Restitution_Dossier', 'Restitutionsdossier', 'Dossier_Restitution')}_${invNumber}.pdf`;
           document.body.appendChild(link);
           link.click();
           document.body.removeChild(link);
@@ -1042,13 +1180,13 @@ export default function App() {
             setDossierStatus(null);
           }, 3000);
         } else {
-          setDossierStatus("[FEHLER: " + (data.detail || "Unbekannter Fehler") + "]");
+          setDossierStatus(t('[ERROR: ', '[FEHLER: ', '[ERREUR : ') + (data.detail || t('Unknown error', 'Unbekannter Fehler', 'Erreur inconnue')) + ']');
           setIsGeneratingDossier(false);
         }
       })
       .catch(err => {
         console.error(err);
-        setDossierStatus("[FEHLER BEI DER PDF-GENERIERUNG]");
+        setDossierStatus(t('[PDF GENERATION ERROR]', '[FEHLER BEI DER PDF-GENERIERUNG]', '[ERREUR DE GÉNÉRATION PDF]'));
         setIsGeneratingDossier(false);
       });
   };
@@ -1096,7 +1234,7 @@ export default function App() {
       });
       if (res.status === 401) {
         setShowLoginModal(true);
-        setLoginError('Forscher-Autorisierung erforderlich.');
+        setLoginError(t('Researcher authorization required.', 'Forscher-Autorisierung erforderlich.', 'Autorisation chercheur requise.'));
         return;
       }
       const data = await res.json();
@@ -1113,14 +1251,14 @@ export default function App() {
         setAnnotations(prev => [newAnn, ...prev]);
         setAnnNotes('');
         setAnnTags('');
-        setAnnStatusMsg('[GESPEICHERT IM GRAPHEN]');
+        setAnnStatusMsg(t('[SAVED IN GRAPH]', '[GESPEICHERT IM GRAPHEN]', '[ENREGISTRÉ DANS LE GRAPHE]'));
         setTimeout(() => setAnnStatusMsg(null), 3500);
       } else {
-        setAnnStatusMsg('[FEHLER BEIM SPEICHERN]');
+        setAnnStatusMsg(t('[SAVE ERROR]', '[FEHLER BEIM SPEICHERN]', "[ERREUR D'ENREGISTREMENT]"));
       }
     } catch (e) {
       console.error(e);
-      setAnnStatusMsg('[NETZWERKFEHLER]');
+      setAnnStatusMsg(t('[NETWORK ERROR]', '[NETZWERKFEHLER]', '[ERREUR RÉSEAU]'));
     } finally {
       setIsSubmittingAnn(false);
     }
@@ -1134,7 +1272,7 @@ export default function App() {
       });
       if (res.status === 401) {
         setShowLoginModal(true);
-        setLoginError("Forscher-Autorisierung erforderlich (Marianne).");
+        setLoginError(t('Researcher authorization required.', 'Forscher-Autorisierung erforderlich (Marianne).', 'Autorisation chercheur requise.'));
         return;
       }
       const data = await res.json();
@@ -1468,10 +1606,10 @@ export default function App() {
   }, [selectedNode, graphData, ghostIds, contestedIds, contestedMap]);
 
   return (
-    <div className="app-root" style={{ width: '100vw', height: '100vh', backgroundColor: '#FFFFFF', display: 'flex', flexDirection: 'column', overflow: 'hidden', fontFamily: "'Space Mono', monospace" }}>
+    <div className="app-root" style={{ width: '100vw', height: '100vh', backgroundColor: '#F7F6F2', display: 'flex', flexDirection: 'column', overflow: 'hidden', fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", color: '#141413' }}>
       
-      {/* 1. TOP HEADER (Fixed in document flow, full width) */}
-      <header className="app-header" style={{ width: '100%', borderBottom: '3px solid #000000', backgroundColor: '#FFFFFF', zIndex: 60, flexShrink: 0, boxSizing: 'border-box' }}>
+      {/* 1. TOP HEADER (Archival Forensics 2-Tier Masthead) */}
+      <header className="app-header" style={{ width: '100%', borderBottom: '1px solid #1C1B19', backgroundColor: '#FFFFFF', zIndex: 60, flexShrink: 0, boxSizing: 'border-box' }}>
         {/* Hidden File Input for Ingestion */}
         <input
           ref={fileInputRef}
@@ -1482,115 +1620,191 @@ export default function App() {
         />
 
         {/* ========================================================= */}
-        {/* DESKTOP HEADER (2-TIER ARCHITECTURAL LAYOUT)               */}
+        {/* DESKTOP HEADER (ARCHIVAL FORENSICS LAYOUT)                */}
         {/* ========================================================= */}
         <div className="desktop-header">
-          {/* TIER 1: BRAND, VIEWS, ACTIONS, SEARCH, AUTH */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 18px', borderBottom: '1px solid #E2E8F0', gap: '12px', flexWrap: 'wrap' }}>
+          {/* TIER 1: BRAND, VIEWS, SEARCH, LANGUAGE, AUTH, TOOLS */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '9px 18px', borderBottom: '1px solid #E5E2DA', gap: '12px', flexWrap: 'wrap' }}>
             {/* Left: Brand & View Switcher */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ backgroundColor: '#000000', color: '#FFFFFF', padding: '2px 8px', fontWeight: 'bold', fontSize: '10px', letterSpacing: '1px' }}>
+                <span className="mono" style={{ backgroundColor: '#141413', color: '#F7F6F2', padding: '3px 8px', fontWeight: 700, fontSize: '10px', letterSpacing: '0.08em' }}>
                   PROJECT ECHO
                 </span>
-                <span style={{ fontSize: '10px', color: '#475569', fontWeight: 'bold', letterSpacing: '0.5px' }}>
-                  RESTITUTION PROVENANCE KNOWLEDGE GRAPH
+                <span style={{ fontSize: '14px', fontWeight: 700, letterSpacing: '-0.02em', color: '#141413' }}>
+                  Shadow Museum Atlas
                 </span>
-                <span style={{ fontSize: '13px', fontWeight: 900, letterSpacing: '-0.5px', color: '#000000', marginLeft: '4px' }}>
-                  SHADOW MUSEUM ATLAS
+                <span className="brand-subtitle" style={{ fontSize: '11px', color: '#78766F', fontWeight: 500, borderLeft: '1px solid #D8D5CD', paddingLeft: '8px' }}>
+                  {t('Colonial Provenance Research', 'Koloniale Provenienzforschung', 'Recherche de provenance coloniale')}
                 </span>
               </div>
 
               {/* View Mode Switcher */}
-              <div style={{ display: 'flex', border: '2px solid #000000', boxShadow: '2px 2px 0px #000000' }}>
+              <div style={{ display: 'flex', border: '1px solid #D8D5CD', backgroundColor: '#F7F6F2', padding: '2px', gap: '2px', borderRadius: '2px', flexWrap: 'wrap' }}>
                 <button
+                  data-testid="tab-graph"
                   onClick={() => setViewMode('graph')}
                   style={{
-                    padding: '4px 9px',
-                    backgroundColor: viewMode === 'graph' ? '#000000' : '#FFFFFF',
-                    color: viewMode === 'graph' ? '#FFFFFF' : '#000000',
+                    padding: '4px 10px',
+                    backgroundColor: viewMode === 'graph' ? '#141413' : 'transparent',
+                    color: viewMode === 'graph' ? '#FFFFFF' : '#3F3E3A',
                     border: 'none',
-                    borderRight: '1px solid #000000',
-                    fontSize: '9px',
-                    fontWeight: 900,
+                    fontSize: '11px',
+                    fontWeight: 600,
                     cursor: 'pointer',
-                    letterSpacing: '0.5px'
+                    borderRadius: '1px'
                   }}
                 >
-                  [GRAPH-NETZWERK]
+                  {t('Knowledge Graph', 'Wissensgraph', 'Graphe')}
                 </button>
                 <button
+                  data-testid="tab-map"
                   onClick={() => setViewMode('map')}
                   style={{
-                    padding: '4px 9px',
-                    backgroundColor: viewMode === 'map' ? '#DC2626' : '#FFFFFF',
-                    color: viewMode === 'map' ? '#FFFFFF' : '#DC2626',
+                    padding: '4px 10px',
+                    backgroundColor: viewMode === 'map' ? '#141413' : 'transparent',
+                    color: viewMode === 'map' ? '#FFFFFF' : '#3F3E3A',
                     border: 'none',
-                    borderRight: '1px solid #000000',
-                    fontSize: '9px',
-                    fontWeight: 900,
+                    borderBottom: viewMode === 'map' ? '2px solid #DC2626' : '2px solid transparent',
+                    fontSize: '11px',
+                    fontWeight: 600,
                     cursor: 'pointer',
-                    letterSpacing: '0.5px'
+                    borderRadius: '1px'
                   }}
                 >
-                  [GEO-KARTE (RESTITUTION)]
+                  {t('Geospatial Map', 'Geo-Karte', 'Carte Géo')}
                 </button>
                 <button
+                  data-testid="tab-visual"
                   onClick={() => setViewMode('visual')}
                   style={{
-                    padding: '4px 9px',
-                    backgroundColor: viewMode === 'visual' ? '#0F766E' : '#FFFFFF',
-                    color: viewMode === 'visual' ? '#FFFFFF' : '#0F766E',
+                    padding: '4px 10px',
+                    backgroundColor: viewMode === 'visual' ? '#141413' : 'transparent',
+                    color: viewMode === 'visual' ? '#FFFFFF' : '#3F3E3A',
                     border: 'none',
-                    fontSize: '9px',
-                    fontWeight: 900,
+                    borderBottom: viewMode === 'visual' ? '2px solid #155E75' : '2px solid transparent',
+                    fontSize: '11px',
+                    fontWeight: 600,
                     cursor: 'pointer',
-                    letterSpacing: '0.5px'
+                    borderRadius: '1px'
                   }}
                 >
-                  [BILD-FORENSIK (FOTO-KETTE)]
+                  {t('Visual Forensics', 'Bild-Forensik', 'Forensique visuelle')}
+                </button>
+                <button
+                  data-testid="tab-docs"
+                  onClick={() => setViewMode('docs')}
+                  style={{
+                    padding: '4px 10px',
+                    backgroundColor: viewMode === 'docs' ? '#141413' : 'transparent',
+                    color: viewMode === 'docs' ? '#FFFFFF' : '#3F3E3A',
+                    border: 'none',
+                    borderBottom: viewMode === 'docs' ? '2px solid #1E40AF' : '2px solid transparent',
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    borderRadius: '1px'
+                  }}
+                >
+                  {t('Documents', 'Dokumente', 'Documents')}
                 </button>
               </div>
             </div>
 
-            {/* Right: Actions, Search, Auth */}
+            {/* Right: Search, Language, Auth, Quiet Tools */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
               {uploadMessage && (
-                <span style={{ padding: '3px 6px', backgroundColor: '#000000', color: '#FFFFFF', fontSize: '8px', fontWeight: 'bold' }}>
+                <span className="mono" style={{ padding: '4px 8px', backgroundColor: '#141413', color: '#F7F6F2', fontSize: '10px', borderRadius: '2px' }}>
                   {uploadMessage}
                 </span>
               )}
               {batchStatus && (
-                <span style={{ padding: '3px 6px', backgroundColor: '#B45309', color: '#FFFFFF', fontSize: '8px', fontWeight: 'bold' }}>
+                <span className="mono" style={{ padding: '4px 8px', backgroundColor: '#92400E', color: '#FFFFFF', fontSize: '10px', borderRadius: '2px' }}>
                   {batchStatus}
                 </span>
               )}
 
               {/* Search Bar */}
-              <div className="brutalist-border" style={{ padding: '3px 6px', display: 'flex', gap: '4px', width: '220px', backgroundColor: '#FFFFFF' }}>
+              <div className="desktop-search-box" style={{ padding: '4px 8px', display: 'flex', alignItems: 'center', gap: '4px', width: '215px', backgroundColor: '#F7F6F2', border: '1px solid #D8D5CD', borderRadius: '2px' }}>
                 <input
                   type="text"
-                  placeholder="SUCHE (INV / AKTEUR / DEPOT)..."
+                  placeholder={t('Search inventory, actor, depot…', 'Suche Inv., Akteur, Depot…', 'Rechercher inv., acteur, dépôt…')}
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   style={{
                     width: '100%',
                     border: 'none',
                     outline: 'none',
-                    fontSize: '9px',
-                    fontWeight: 'bold',
+                    fontSize: '11px',
+                    color: '#141413',
                     backgroundColor: 'transparent',
-                    fontFamily: "'Space Mono', monospace"
                   }}
                 />
                 {searchTerm && (
                   <button
                     onClick={() => setSearchTerm('')}
-                    style={{ border: 'none', background: 'none', cursor: 'pointer', fontWeight: 'bold', fontSize: '9px' }}
+                    style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#52514C', fontSize: '11px', padding: '0 2px' }}
                   >
-                    [X]
+                    ✕
                   </button>
                 )}
+              </div>
+
+              {/* Language Switcher (EN | DE | FR) */}
+              <div className="mono" style={{ display: 'flex', border: '1px solid #D8D5CD', borderRadius: '2px', overflow: 'hidden' }} role="group" aria-label="Language">
+                <button
+                  type="button"
+                  data-testid="lang-btn-en"
+                  onClick={() => setLang('en')}
+                  style={{
+                    padding: '4px 7px',
+                    backgroundColor: lang === 'en' ? '#141413' : '#FFFFFF',
+                    color: lang === 'en' ? '#FFFFFF' : '#52514C',
+                    border: 'none',
+                    borderRight: '1px solid #D8D5CD',
+                    fontSize: '10px',
+                    fontWeight: 700,
+                    cursor: 'pointer'
+                  }}
+                  title="Switch interface to English"
+                >
+                  EN
+                </button>
+                <button
+                  type="button"
+                  data-testid="lang-btn-de"
+                  onClick={() => setLang('de')}
+                  style={{
+                    padding: '4px 7px',
+                    backgroundColor: lang === 'de' ? '#141413' : '#FFFFFF',
+                    color: lang === 'de' ? '#FFFFFF' : '#52514C',
+                    border: 'none',
+                    borderRight: '1px solid #D8D5CD',
+                    fontSize: '10px',
+                    fontWeight: 700,
+                    cursor: 'pointer'
+                  }}
+                  title="Oberfläche auf Deutsch umschalten"
+                >
+                  DE
+                </button>
+                <button
+                  type="button"
+                  data-testid="lang-btn-fr"
+                  onClick={() => setLang('fr')}
+                  style={{
+                    padding: '4px 7px',
+                    backgroundColor: lang === 'fr' ? '#141413' : '#FFFFFF',
+                    color: lang === 'fr' ? '#FFFFFF' : '#52514C',
+                    border: 'none',
+                    fontSize: '10px',
+                    fontWeight: 700,
+                    cursor: 'pointer'
+                  }}
+                  title="Passer l'interface en français"
+                >
+                  FR
+                </button>
               </div>
 
               {/* Dual-Mode Auth Badge */}
@@ -1598,79 +1812,44 @@ export default function App() {
                 <div style={{
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '5px',
-                  border: '2px solid #16A34A',
+                  gap: '6px',
+                  border: '1px solid #86EFAC',
                   backgroundColor: '#F0FDF4',
-                  padding: '3px 7px',
-                  boxShadow: '2px 2px 0px #16A34A'
+                  padding: '3px 8px',
+                  borderRadius: '2px'
                 }}>
-                  <span style={{ fontSize: '9px', fontWeight: 900, color: '#16A34A', letterSpacing: '0.5px' }}>
-                    ● [MARIANNE // VOLLZUGRIFF]
+                  <span style={{ fontSize: '10.5px', fontWeight: 600, color: '#166534' }}>
+                    {t('● Researcher', '● Forscher-Modus', '● Chercheur')}
                   </span>
                   <button
                     onClick={handleLogout}
-                    title="Ausloggen und in Gast-Modus wechseln"
+                    title={t('Sign out and switch to guest mode', 'Ausloggen und in Gast-Modus wechseln', 'Se déconnecter et passer en mode invité')}
                     style={{
-                      padding: '2px 5px',
-                      fontSize: '8px',
-                      fontWeight: 'bold',
-                      backgroundColor: '#000000',
-                      color: '#FFFFFF',
-                      border: 'none',
+                      padding: '2px 6px',
+                      fontSize: '10px',
+                      fontWeight: 600,
+                      backgroundColor: '#FFFFFF',
+                      color: '#141413',
+                      border: '1px solid #D8D5CD',
                       cursor: 'pointer'
                     }}
                   >
-                    LOGOUT
+                    {t('Sign out', 'Logout', 'Sortir')}
                   </button>
                 </div>
               ) : (
-                <div style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '5px',
-                  border: '2px solid #64748B',
-                  backgroundColor: '#F8FAFC',
-                  padding: '3px 7px',
-                  boxShadow: '2px 2px 0px #000000'
-                }}>
-                  <span style={{ fontSize: '9px', fontWeight: 900, color: '#475569', letterSpacing: '0.5px' }}>
-                    ○ [GAST // EXPLORER]
-                  </span>
-                  <button
-                    onClick={() => { setShowLoginModal(true); setLoginError(null); }}
-                    title="Forscher-Passwort für Vollzugriff eingeben"
-                    style={{
-                      padding: '2px 5px',
-                      fontSize: '8px',
-                      fontWeight: 'bold',
-                      backgroundColor: '#000000',
-                      color: '#FFFFFF',
-                      border: 'none',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    FORSCHER-LOGIN
-                  </button>
-                </div>
+                <button
+                  onClick={() => { setShowLoginModal(true); setLoginError(null); }}
+                  title={t('Enable researcher or browser sandbox write access', 'Forscher- oder Browser-Sandbox-Modus aktivieren', "Activer le mode chercheur ou bac à sable local")}
+                  className="archival-btn"
+                  style={{ padding: '4px 9px', fontSize: '10.5px' }}
+                >
+                  <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#78766F', display: 'inline-block' }} />
+                  {t('Researcher Mode', 'Forscher-Login', 'Mode Chercheur')}
+                </button>
               )}
 
-              {/* Action Buttons */}
-              <button
-                onClick={handleResetLayout}
-                style={{
-                  padding: '5px 7px',
-                  backgroundColor: '#000000',
-                  color: '#FFFFFF',
-                  border: '2px solid #000000',
-                  boxShadow: '2px 2px 0px #DC2626',
-                  fontSize: '9px',
-                  fontWeight: 'bold',
-                  cursor: 'pointer'
-                }}
-              >
-                [LAYOUT RESETTEN]
-              </button>
-
+              {/* Quiet Tool Controls */}
               <button
                 onClick={() => {
                   const next = !kioskMode;
@@ -1680,20 +1859,21 @@ export default function App() {
                     setGhostMode(false);
                   }
                 }}
-                title="Museums-Installationsmodus: Automatischer Kameraflug über Raubkunst- und Dissonanzknoten"
+                title={t(
+                  'Museum installation mode: automatic camera tour across looted and contested nodes',
+                  'Museums-Installationsmodus: Automatischer Kameraflug über Raubkunst- und Dissonanzknoten',
+                  'Mode exposition muséale : survol automatique des nœuds pillés et contestés'
+                )}
+                className="archival-btn"
                 style={{
-                  padding: '5px 8px',
-                  backgroundColor: kioskMode ? '#000000' : '#FFFFFF',
-                  color: kioskMode ? '#F59E0B' : '#000000',
-                  border: kioskMode ? '2px solid #F59E0B' : '2px solid #000000',
-                  boxShadow: kioskMode ? '2px 2px 0px #F59E0B' : '2px 2px 0px #000000',
-                  fontWeight: 900,
-                  fontSize: '9px',
-                  cursor: 'pointer',
-                  letterSpacing: '0.5px'
+                  padding: '4px 8px',
+                  fontSize: '10.5px',
+                  backgroundColor: kioskMode ? '#141413' : '#FFFFFF',
+                  color: kioskMode ? '#FBBF24' : '#3F3E3A',
+                  borderColor: kioskMode ? '#141413' : '#D8D5CD'
                 }}
               >
-                {kioskMode ? '[KIOSK-AUTOPILOT: AKTIV]' : '[KIOSK-MODUS (AUTOPILOT)]'}
+                {kioskMode ? t('Tour active', 'Tour aktiv', 'Visite active') : t('Kiosk Tour', 'Kiosk-Tour', 'Visite')}
               </button>
 
               <button
@@ -1702,251 +1882,150 @@ export default function App() {
                   if (!ghostMode) setActiveMetricFilter(null);
                   if (fgRef.current) fgRef.current.zoomToFit(800, 50);
                 }}
+                className="archival-btn"
                 style={{
-                  padding: '5px 8px',
-                  backgroundColor: ghostMode ? '#DC2626' : '#FFFFFF',
-                  color: ghostMode ? '#FFFFFF' : '#000000',
-                  border: '2px solid #000000',
-                  boxShadow: '2px 2px 0px #000000',
-                  fontWeight: 'bold',
-                  fontSize: '9px',
-                  cursor: 'pointer'
+                  padding: '4px 8px',
+                  fontSize: '10.5px',
+                  backgroundColor: ghostMode ? '#991B1B' : '#FFFFFF',
+                  color: ghostMode ? '#FFFFFF' : '#3F3E3A',
+                  borderColor: ghostMode ? '#991B1B' : '#D8D5CD'
                 }}
               >
-                {ghostMode ? '[GHOST-MODUS AKTIV]' : '[GHOST-NODES (VERSCHOLLEN)]'}
+                {ghostMode ? t('Missing active', 'Verschollen aktiv', 'Disparus actifs') : t('Missing', 'Verschollen', 'Disparus')}
               </button>
 
               <button
                 onClick={() => fileInputRef.current?.click()}
                 disabled={isUploading}
-                style={{
-                  padding: '5px 8px',
-                  backgroundColor: '#F8FAFC',
-                  color: '#000000',
-                  border: '2px dashed #000000',
-                  boxShadow: '2px 2px 0px #000000',
-                  fontWeight: 'bold',
-                  fontSize: '9px',
-                  cursor: isUploading ? 'wait' : 'pointer'
-                }}
+                className="archival-btn"
+                style={{ padding: '4px 8px', fontSize: '10.5px' }}
               >
-                {isUploading ? '[INGESTION LAEUFT...]' : '[+ QUELLE INJIZIEREN]'}
+                {isUploading
+                  ? t('Ingesting…', 'Lädt…', 'Ingestion…')
+                  : t('+ Import Source', '+ Quelle laden', '+ Importer')}
               </button>
 
               <button
                 onClick={() => fgRef.current?.zoomToFit(600, 40)}
-                style={{
-                  padding: '5px 7px',
-                  backgroundColor: '#FFFFFF',
-                  border: '2px solid #000000',
-                  boxShadow: '2px 2px 0px #000000',
-                  fontSize: '9px',
-                  fontWeight: 'bold',
-                  cursor: 'pointer'
-                }}
+                className="archival-btn"
+                style={{ padding: '4px 8px', fontSize: '10.5px' }}
               >
-                [ZOOM TO FIT]
+                {t('Fit', 'Anpassen', 'Ajuster')}
+              </button>
+
+              <button
+                onClick={handleResetLayout}
+                title={t('Reset manual node positions', 'Manuelle Knoten-Positionen zurücksetzen', 'Réinitialiser la disposition')}
+                className="archival-btn"
+                style={{ padding: '4px 8px', fontSize: '10.5px', color: '#52514C' }}
+              >
+                {t('Reset', 'Reset', 'Réinit.')}
               </button>
             </div>
           </div>
 
-          {/* TIER 2: METRICS & SOURCES */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 18px', gap: '12px', flexWrap: 'wrap', backgroundColor: '#FAFAFA' }}>
-            {/* Metrik-Schalter */}
+          {/* TIER 2: QUIET SEMANTIC METRICS & SOURCES */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 18px', gap: '12px', flexWrap: 'wrap', backgroundColor: '#F7F6F2' }}>
+            {/* Metrik-Schalter (Ruhige Archiv-Filter mit semantischem Farbpunkt) */}
             <div style={{ display: 'flex', gap: '5px', alignItems: 'center', flexWrap: 'wrap' }}>
-              <button
-                onClick={() => handleMetricToggle('subjekte')}
-                title="Klicken zum Isolieren aller Subjekte / Kulturgüter"
-                style={{
-                  backgroundColor: activeMetricFilter === 'subjekte' ? '#000000' : '#F1F5F9',
-                  color: activeMetricFilter === 'subjekte' ? '#FFFFFF' : '#000000',
-                  border: '2px solid #000000',
-                  padding: '3px 7px',
-                  fontSize: '9px',
-                  fontWeight: 'bold',
-                  cursor: 'pointer',
-                  boxShadow: activeMetricFilter === 'subjekte' ? '2px 2px 0px #000000' : 'none'
-                }}
-              >
-                {stats.subjekte.toLocaleString()} SUBJEKTE
-              </button>
-
-              <button
-                onClick={() => handleMetricToggle('raub')}
-                title="Klicken zum Isolieren des militärischen Raubnetzwerks"
-                style={{
-                  backgroundColor: activeMetricFilter === 'raub' ? '#DC2626' : '#FFFFFF',
-                  color: activeMetricFilter === 'raub' ? '#FFFFFF' : '#DC2626',
-                  border: '2px solid #DC2626',
-                  padding: '3px 7px',
-                  fontSize: '9px',
-                  fontWeight: 'bold',
-                  cursor: 'pointer',
-                  boxShadow: activeMetricFilter === 'raub' ? '2px 2px 0px #000000' : 'none'
-                }}
-              >
-                {stats.raub_kanten.toLocaleString()} RAUB-KANTEN
-              </button>
-
-              <button
-                onClick={() => handleMetricToggle('schenkung')}
-                title="Klicken zum Isolieren der offiziellen Museums-Schenkungen"
-                style={{
-                  backgroundColor: activeMetricFilter === 'schenkung' ? '#2563EB' : '#FFFFFF',
-                  color: activeMetricFilter === 'schenkung' ? '#FFFFFF' : '#2563EB',
-                  border: '2px solid #2563EB',
-                  padding: '3px 7px',
-                  fontSize: '9px',
-                  fontWeight: 'bold',
-                  cursor: 'pointer',
-                  boxShadow: activeMetricFilter === 'schenkung' ? '2px 2px 0px #000000' : 'none'
-                }}
-              >
-                {stats.schenk_kanten.toLocaleString()} SCHENKUNGEN
-              </button>
-
-              <button
-                onClick={() => handleMetricToggle('dissonanz')}
-                title="Klicken zum Isolieren der semantischen Dissonanzen (Multigraph-Kollision)"
-                style={{
-                  backgroundColor: activeMetricFilter === 'dissonanz' ? '#CA8A04' : '#FFFFFF',
-                  color: activeMetricFilter === 'dissonanz' ? '#FFFFFF' : '#854D0E',
-                  border: '2px solid #CA8A04',
-                  padding: '3px 7px',
-                  fontSize: '9px',
-                  fontWeight: 'bold',
-                  cursor: 'pointer',
-                  boxShadow: activeMetricFilter === 'dissonanz' ? '2px 2px 0px #000000' : 'none'
-                }}
-              >
-                {stats.contested_objekte.toLocaleString()} DISSONANZEN
-              </button>
-
-              <button
-                onClick={() => handleMetricToggle('luecken')}
-                title="Klicken zum Isolieren der Provenienzlücken (Chain of Custody gerissen: LAGERT_IN ohne Akteur)"
-                style={{
-                  backgroundColor: activeMetricFilter === 'luecken' ? '#7C3AED' : '#FFFFFF',
-                  color: activeMetricFilter === 'luecken' ? '#FFFFFF' : '#7C3AED',
-                  border: '2px solid #7C3AED',
-                  padding: '3px 7px',
-                  fontSize: '9px',
-                  fontWeight: 'bold',
-                  cursor: 'pointer',
-                  boxShadow: activeMetricFilter === 'luecken' ? '2px 2px 0px #000000' : 'none'
-                }}
-              >
-                {(stats.provenienz_luecken || 83).toLocaleString()} PROVENIENZLÜCKEN
-              </button>
-
-              <button
-                onClick={() => handleMetricToggle('verdacht')}
-                title="Klicken zum Isolieren der 36 probabilistischen Verdachtskanten (Autonomous Provenance Hunter)"
-                style={{
-                  backgroundColor: activeMetricFilter === 'verdacht' ? '#0891B2' : '#FFFFFF',
-                  color: activeMetricFilter === 'verdacht' ? '#FFFFFF' : '#0891B2',
-                  border: '2px solid #0891B2',
-                  padding: '3px 7px',
-                  fontSize: '9px',
-                  fontWeight: 'bold',
-                  cursor: 'pointer',
-                  boxShadow: activeMetricFilter === 'verdacht' ? '2px 2px 0px #000000' : 'none'
-                }}
-              >
-                {(stats.verdacht_kanten || suspicions.length || 36).toLocaleString()} VERDACHTS-KANTEN
-              </button>
-
-              <button
-                onClick={() => handleMetricToggle('akteure')}
-                title="Klicken zum Isolieren der Kolonialakteure / Offiziere"
-                style={{
-                  backgroundColor: activeMetricFilter === 'akteure' ? '#B45309' : '#FFFFFF',
-                  color: activeMetricFilter === 'akteure' ? '#FFFFFF' : '#B45309',
-                  border: '2px solid #B45309',
-                  padding: '3px 7px',
-                  fontSize: '9px',
-                  fontWeight: 'bold',
-                  cursor: 'pointer',
-                  boxShadow: activeMetricFilter === 'akteure' ? '2px 2px 0px #000000' : 'none'
-                }}
-              >
-                {stats.akteure} AKTEURE
-              </button>
-
-              <button
-                onClick={() => handleMetricToggle('depots')}
-                title="Klicken zum Isolieren der Museumsinstitutionen"
-                style={{
-                  backgroundColor: activeMetricFilter === 'depots' ? '#000000' : '#FFFFFF',
-                  color: activeMetricFilter === 'depots' ? '#FFFFFF' : '#000000',
-                  border: '2px solid #000000',
-                  padding: '3px 7px',
-                  fontSize: '9px',
-                  fontWeight: 'bold',
-                  cursor: 'pointer',
-                  boxShadow: activeMetricFilter === 'depots' ? '2px 2px 0px #000000' : 'none'
-                }}
-              >
-                {stats.institutionen} DEPOTS
-              </button>
+              {([
+                ['subjekte', stats.subjekte.toLocaleString(), t('Objects', 'Subjekte', 'Objets'), '#141413', t('Isolate all cultural heritage objects', 'Alle Kulturgüter isolieren', 'Isoler tous les biens culturels')],
+                ['raub', stats.raub_kanten.toLocaleString(), t('Loot', 'Raub', 'Pillage'), '#991B1B', t('Isolate military looting network', 'Militärisches Raubnetzwerk isolieren', 'Isoler le réseau de pillage militaire')],
+                ['schenkung', stats.schenk_kanten.toLocaleString(), t('Donations', 'Schenkungen', 'Dons'), '#1E40AF', t('Isolate alleged museum donations', 'Offizielle Museums-Schenkungen isolieren', 'Isoler les dons allégués')],
+                ['dissonanz', stats.contested_objekte.toLocaleString(), t('Dissonances', 'Dissonanzen', 'Dissonances'), '#92400E', t('Isolate multigraph collisions', 'Multigraph-Kollisionen isolieren', 'Isoler les dissonances sémantiques')],
+                ['luecken', (stats.provenienz_luecken || 83).toLocaleString(), t('Gaps', 'Lücken', 'Lacunes'), '#5B21B6', t('Isolate provenance gaps (no recorded actor)', 'Provenienzlücken isolieren (ohne Akteur)', 'Isoler les lacunes de provenance')],
+                ['verdacht', (stats.verdacht_kanten || suspicions.length || 36).toLocaleString(), t('Suspicions', 'Verdacht', 'Soupçons'), '#155E75', t('Isolate probabilistic suspicion edges', 'Probabilistische Verdachtskanten isolieren', 'Isoler les soupçons probabilistes')],
+                ['akteure', String(stats.akteure), t('Actors', 'Akteure', 'Acteurs'), '#9A3412', t('Isolate colonial actors / officers', 'Kolonialakteure isolieren', 'Isoler les acteurs coloniaux')],
+                ['depots', String(stats.institutionen), t('Depots', 'Depots', 'Dépôts'), '#3F3E3A', t('Isolate museum depots', 'Museumsdepots isolieren', 'Isoler les dépôts muséaux')],
+              ] as const).map(([key, countStr, label, accent, tip]) => {
+                const active = activeMetricFilter === key;
+                return (
+                  <button
+                    key={key}
+                    onClick={() => handleMetricToggle(key)}
+                    title={tip}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      backgroundColor: active ? accent : '#FFFFFF',
+                      color: active ? '#FFFFFF' : '#141413',
+                      border: `1px solid ${active ? accent : '#D8D5CD'}`,
+                      borderRadius: '2px',
+                      padding: '3px 8px',
+                      fontSize: '10.5px',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: active ? '#FFFFFF' : accent, display: 'inline-block' }} />
+                    <span className="mono" style={{ fontSize: '10px', fontWeight: 700 }}>{countStr}</span>
+                    <span>{label}</span>
+                  </button>
+                );
+              })}
 
               {activeMetricFilter && (
                 <button
                   onClick={() => setActiveMetricFilter(null)}
                   style={{
-                    backgroundColor: '#000000',
+                    backgroundColor: '#141413',
                     color: '#FFFFFF',
-                    border: '1px solid #000000',
-                    padding: '3px 6px',
-                    fontSize: '8px',
-                    fontWeight: 'bold',
+                    border: 'none',
+                    borderRadius: '2px',
+                    padding: '4px 8px',
+                    fontSize: '10px',
+                    fontWeight: 600,
                     cursor: 'pointer'
                   }}
                 >
-                  [RESET FILTER]
+                  {t('Clear filter', 'Filter aufheben', 'Effacer le filtre')}
                 </button>
               )}
             </div>
 
             {/* Zuschaltbare Quellen */}
             <div style={{ display: 'flex', gap: '5px', alignItems: 'center', flexWrap: 'wrap' }}>
-              <span style={{ fontSize: '8px', fontWeight: 900, color: '#000000' }}>QUELLEN:</span>
+              <span style={{ fontSize: '10px', fontWeight: 600, color: '#78766F' }}>{t('Sources:', 'Quellen:', 'Sources :')}</span>
               {publications.map((pub: any) => {
                 const isActive = selectedPubs.has(pub.id);
                 return (
-                  <div key={pub.id} style={{ display: 'inline-flex', border: '1px solid #000000' }}>
+                  <div key={pub.id} style={{ display: 'inline-flex', border: '1px solid #D8D5CD', borderRadius: '2px', overflow: 'hidden' }}>
                     <button
                       onClick={() => togglePublication(pub.id)}
                       title={`${pub.name} (${pub.typ}, ${pub.jahr || ''})`}
+                      className="mono"
                       style={{
-                        padding: '2px 5px',
-                        fontSize: '8px',
-                        fontWeight: 'bold',
+                        padding: '2px 6px',
+                        fontSize: '9.5px',
+                        fontWeight: 700,
                         cursor: 'pointer',
-                        backgroundColor: isActive ? '#000000' : '#FFFFFF',
-                        color: isActive ? '#FFFFFF' : '#64748B',
+                        backgroundColor: isActive ? '#141413' : '#FFFFFF',
+                        color: isActive ? '#F7F6F2' : '#78766F',
                         border: 'none',
-                        borderRight: '1px solid #000000',
+                        borderRight: isResearcher ? '1px solid #D8D5CD' : 'none',
                         textDecoration: isActive ? 'none' : 'line-through'
                       }}
                     >
-                      [{isActive ? 'X' : ' '}] {pub.kuerzel} ({pub.edge_count})
+                      {pub.kuerzel} ({pub.edge_count})
                     </button>
-                    <button
-                      onClick={() => handleDeletePublication(pub.id)}
-                      title="Publikation restlos löschen"
-                      style={{
-                        padding: '2px 5px',
-                        fontSize: '8px',
-                        fontWeight: 'bold',
-                        cursor: 'pointer',
-                        backgroundColor: '#DC2626',
-                        color: '#FFFFFF',
-                        border: 'none'
-                      }}
-                    >
-                      x
-                    </button>
+                    {isResearcher && (
+                      <button
+                        onClick={() => handleDeletePublication(pub.id)}
+                        title={t('Permanently delete publication', 'Publikation restlos löschen', 'Supprimer définitivement cette publication')}
+                        style={{
+                          padding: '2px 5px',
+                          fontSize: '9.5px',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          backgroundColor: '#FEF2F2',
+                          color: '#991B1B',
+                          border: 'none'
+                        }}
+                      >
+                        ×
+                      </button>
+                    )}
                   </div>
                 );
               })}
@@ -1955,82 +2034,135 @@ export default function App() {
         </div>
 
         {/* ========================================================= */}
-        {/* MOBILE HEADER (COMPACT TOP BAR + EXPANDABLE DRAWER)       */}
+        {/* MOBILE HEADER (ARCHIVAL COMPACT TOP BAR + DRAWER)         */}
         {/* ========================================================= */}
         <div className="mobile-header">
-          {/* Top Bar (Height ~48px) */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', backgroundColor: '#FFFFFF', borderBottom: mobileMenuOpen ? '2px solid #000000' : 'none' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ backgroundColor: '#000000', color: '#FFFFFF', padding: '2px 6px', fontWeight: 'bold', fontSize: '9px', letterSpacing: '1px' }}>
+          {/* Top Bar (Height ~46px) */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 8px', backgroundColor: '#FFFFFF', borderBottom: mobileMenuOpen ? '1px solid #D8D5CD' : 'none', gap: '4px', minHeight: '32px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', minWidth: 0 }}>
+              <button
+                type="button"
+                data-testid="mobile-index-toggle"
+                onClick={() => { setMobileSidebarOpen(!mobileSidebarOpen); setMobileMenuOpen(false); }}
+                style={{
+                  padding: '4px 7px',
+                  backgroundColor: mobileSidebarOpen ? '#9A3412' : '#141413',
+                  color: '#FFFFFF',
+                  border: 'none',
+                  borderRadius: '2px',
+                  fontWeight: 600,
+                  fontSize: '10px',
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap'
+                }}
+                title={t('Browse Actors, Depots, Provenance Gaps & Key Objects', 'Akteure, Depots, Lücken & Leitobjekte öffnen', 'Parcourir acteurs, dépôts, lacunes et objets phares')}
+              >
+                {mobileSidebarOpen ? '✕ Index' : '☰ Index'}
+              </button>
+              <span className="mono" style={{ fontSize: '10px', fontWeight: 700, color: '#141413', whiteSpace: 'nowrap' }}>
                 ECHO
-              </span>
-              <span style={{ fontSize: '11px', fontWeight: 900, color: '#000000', letterSpacing: '-0.3px' }}>
-                SHADOW ATLAS
               </span>
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <div style={{ display: 'flex', border: '1.5px solid #000000' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', minWidth: 0 }}>
+              <div style={{ display: 'flex', border: '1px solid #D8D5CD', backgroundColor: '#F7F6F2', padding: '1px', borderRadius: '2px' }}>
                 <button
-                  onClick={() => setViewMode('graph')}
+                  data-testid="mobile-tab-graph"
+                  onClick={() => { setViewMode('graph'); setMobileSidebarOpen(false); }}
                   style={{
-                    padding: '3px 7px',
-                    backgroundColor: viewMode === 'graph' ? '#000000' : '#FFFFFF',
-                    color: viewMode === 'graph' ? '#FFFFFF' : '#000000',
+                    padding: '4px 6px',
+                    backgroundColor: viewMode === 'graph' ? '#141413' : 'transparent',
+                    color: viewMode === 'graph' ? '#FFFFFF' : '#3F3E3A',
                     border: 'none',
-                    borderRight: '1px solid #000000',
-                    fontSize: '8px',
-                    fontWeight: 900,
+                    fontSize: '9.5px',
+                    fontWeight: 600,
                     cursor: 'pointer'
                   }}
                 >
-                  GRAPH
+                  {t('Graph', 'Graph', 'Graph')}
                 </button>
                 <button
-                  onClick={() => setViewMode('map')}
+                  data-testid="mobile-tab-map"
+                  onClick={() => { setViewMode('map'); setMobileSidebarOpen(false); }}
                   style={{
-                    padding: '3px 7px',
-                    backgroundColor: viewMode === 'map' ? '#DC2626' : '#FFFFFF',
-                    color: viewMode === 'map' ? '#FFFFFF' : '#DC2626',
+                    padding: '4px 6px',
+                    backgroundColor: viewMode === 'map' ? '#991B1B' : 'transparent',
+                    color: viewMode === 'map' ? '#FFFFFF' : '#3F3E3A',
                     border: 'none',
-                    borderRight: '1px solid #000000',
-                    fontSize: '8px',
-                    fontWeight: 900,
+                    fontSize: '9.5px',
+                    fontWeight: 600,
                     cursor: 'pointer'
                   }}
                 >
-                  MAP
+                  {t('Map', 'Map', 'Carte')}
                 </button>
                 <button
-                  onClick={() => setViewMode('visual')}
+                  data-testid="mobile-tab-visual"
+                  onClick={() => { setViewMode('visual'); setMobileSidebarOpen(false); }}
                   style={{
-                    padding: '3px 7px',
-                    backgroundColor: viewMode === 'visual' ? '#0F766E' : '#FFFFFF',
-                    color: viewMode === 'visual' ? '#FFFFFF' : '#0F766E',
+                    padding: '4px 6px',
+                    backgroundColor: viewMode === 'visual' ? '#155E75' : 'transparent',
+                    color: viewMode === 'visual' ? '#FFFFFF' : '#3F3E3A',
                     border: 'none',
-                    fontSize: '8px',
-                    fontWeight: 900,
+                    fontSize: '9.5px',
+                    fontWeight: 600,
                     cursor: 'pointer'
                   }}
                 >
-                  FOTO
+                  {t('Photo', 'Foto', 'Photo')}
+                </button>
+                <button
+                  data-testid="mobile-tab-docs"
+                  onClick={() => { setViewMode('docs'); setMobileSidebarOpen(false); }}
+                  style={{
+                    padding: '4px 6px',
+                    backgroundColor: viewMode === 'docs' ? '#1E40AF' : 'transparent',
+                    color: viewMode === 'docs' ? '#FFFFFF' : '#3F3E3A',
+                    border: 'none',
+                    fontSize: '9.5px',
+                    fontWeight: 600,
+                    cursor: 'pointer'
+                  }}
+                >
+                  {t('Docs', 'Doks', 'Docs')}
                 </button>
               </div>
 
               <button
-                onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+                type="button"
+                data-testid="mobile-lang-toggle"
+                onClick={cycleLang}
+                className="mono"
                 style={{
-                  padding: '4px 8px',
-                  fontSize: '9px',
-                  fontWeight: 900,
-                  border: '2px solid #000000',
-                  backgroundColor: mobileMenuOpen ? '#000000' : '#FFFFFF',
-                  color: mobileMenuOpen ? '#FFFFFF' : '#000000',
+                  padding: '4px 6px',
+                  fontSize: '9.5px',
+                  fontWeight: 700,
+                  border: '1px solid #D8D5CD',
+                  borderRadius: '2px',
+                  backgroundColor: '#FFFFFF',
+                  color: '#141413',
+                  cursor: 'pointer'
+                }}
+                title={t('Switch language (EN / DE / FR)', 'Sprache wechseln (EN / DE / FR)', 'Changer de langue (EN / DE / FR)')}
+              >
+                {lang.toUpperCase()}
+              </button>
+
+              <button
+                onClick={() => { setMobileMenuOpen(!mobileMenuOpen); setMobileSidebarOpen(false); }}
+                style={{
+                  padding: '4px 7px',
+                  fontSize: '10px',
+                  fontWeight: 600,
+                  border: '1px solid #D8D5CD',
+                  borderRadius: '2px',
+                  backgroundColor: mobileMenuOpen ? '#141413' : '#FFFFFF',
+                  color: mobileMenuOpen ? '#FFFFFF' : '#141413',
                   cursor: 'pointer',
-                  boxShadow: '1px 1px 0px #000000'
+                  whiteSpace: 'nowrap'
                 }}
               >
-                {mobileMenuOpen ? '[✕ SCHLIESSEN]' : '[☰ MENÜ / FILTER]'}
+                {mobileMenuOpen ? '✕' : '☰'}
               </button>
             </div>
           </div>
@@ -2038,11 +2170,35 @@ export default function App() {
           {/* Expandable Mobile Drawer */}
           {mobileMenuOpen && (
             <div style={{ padding: '10px 12px', backgroundColor: '#F8FAFC', borderTop: '2px solid #000000', display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '70vh', overflowY: 'auto', boxSizing: 'border-box' }}>
+              {/* Mobile Language Selector */}
+              <div style={{ display: 'flex', border: '1.5px solid #000000' }}>
+                {(['en', 'de', 'fr'] as const).map((code, idx) => (
+                  <button
+                    key={code}
+                    type="button"
+                    onClick={() => setLang(code)}
+                    style={{
+                      flex: 1,
+                      padding: '4px 6px',
+                      fontSize: '8.5px',
+                      fontWeight: 900,
+                      border: 'none',
+                      borderRight: idx < 2 ? '1px solid #000000' : 'none',
+                      backgroundColor: lang === code ? '#000000' : '#FFFFFF',
+                      color: lang === code ? '#FFFFFF' : '#000000',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    {code === 'en' ? 'ENGLISH (EN)' : code === 'de' ? 'DEUTSCH (DE)' : 'FRANÇAIS (FR)'}
+                  </button>
+                ))}
+              </div>
+
               {/* Search */}
               <div className="brutalist-border" style={{ padding: '4px 8px', display: 'flex', gap: '4px', width: '100%', boxSizing: 'border-box', backgroundColor: '#FFFFFF' }}>
                 <input
                   type="text"
-                  placeholder="SUCHE (INV / AKTEUR / DEPOT)..."
+                  placeholder={t('SEARCH (INV / ACTOR / DEPOT)...', 'SUCHE (INV / AKTEUR / DEPOT)...', 'RECHERCHE (INV / ACTEUR / DÉPÔT)...')}
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   style={{
@@ -2069,13 +2225,13 @@ export default function App() {
               <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
                 {isResearcher ? (
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px', border: '1.5px solid #16A34A', backgroundColor: '#F0FDF4', padding: '3px 6px' }}>
-                    <span style={{ fontSize: '8px', fontWeight: 900, color: '#16A34A' }}>● MARIANNE</span>
-                    <button onClick={handleLogout} style={{ padding: '2px 5px', fontSize: '8px', fontWeight: 'bold', backgroundColor: '#000000', color: '#FFFFFF', border: 'none', cursor: 'pointer' }}>LOGOUT</button>
+                    <span style={{ fontSize: '8px', fontWeight: 900, color: '#16A34A' }}>{t('● RESEARCHER', '● MARIANNE', '● CHERCHEUR')}</span>
+                    <button onClick={handleLogout} style={{ padding: '2px 5px', fontSize: '8px', fontWeight: 'bold', backgroundColor: '#000000', color: '#FFFFFF', border: 'none', cursor: 'pointer' }}>{t('LOGOUT', 'LOGOUT', 'SORTIR')}</button>
                   </div>
                 ) : (
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px', border: '1.5px solid #64748B', backgroundColor: '#FFFFFF', padding: '3px 6px' }}>
-                    <span style={{ fontSize: '8px', fontWeight: 900, color: '#475569' }}>○ GAST</span>
-                    <button onClick={() => { setShowLoginModal(true); setLoginError(null); setMobileMenuOpen(false); }} style={{ padding: '2px 5px', fontSize: '8px', fontWeight: 'bold', backgroundColor: '#000000', color: '#FFFFFF', border: 'none', cursor: 'pointer' }}>LOGIN</button>
+                    <span style={{ fontSize: '8px', fontWeight: 900, color: '#475569' }}>{t('○ GUEST', '○ GAST', '○ INVITÉ')}</span>
+                    <button onClick={() => { setShowLoginModal(true); setLoginError(null); setMobileMenuOpen(false); }} style={{ padding: '2px 5px', fontSize: '8px', fontWeight: 'bold', backgroundColor: '#000000', color: '#FFFFFF', border: 'none', cursor: 'pointer' }}>{t('LOGIN', 'LOGIN', 'CONNEXION')}</button>
                   </div>
                 )}
                 <div style={{ display: 'flex', gap: '4px' }}>
@@ -2107,7 +2263,7 @@ export default function App() {
                     textAlign: 'center'
                   }}
                 >
-                  {kioskMode ? '● KIOSK: AKTIV' : '○ KIOSK-MODUS'}
+                  {kioskMode ? t('● KIOSK: ACTIVE', '● KIOSK: AKTIV', '● KIOSQUE : ACTIF') : t('○ KIOSK MODE', '○ KIOSK-MODUS', '○ MODE KIOSQUE')}
                 </button>
                 <button
                   onClick={() => {
@@ -2127,7 +2283,7 @@ export default function App() {
                     textAlign: 'center'
                   }}
                 >
-                  {ghostMode ? '● GHOST AKTIV' : '○ GHOST NODES'}
+                  {ghostMode ? t('● GHOST ACTIVE', '● GHOST AKTIV', '● FANTÔME ACTIF') : t('○ GHOST NODES', '○ GHOST NODES', '○ NŒUDS FANTÔMES')}
                 </button>
               </div>
 
@@ -2149,14 +2305,14 @@ export default function App() {
                   textAlign: 'center'
                 }}
               >
-                {isUploading ? '[INGESTION LAEUFT...]' : '[+ QUELLE INJIZIEREN]'}
+                {isUploading ? t('[INGESTING...]', '[INGESTION LAEUFT...]', '[INGESTION...]') : t('[+ INJECT SOURCE]', '[+ QUELLE INJIZIEREN]', '[+ INJECTER UNE SOURCE]')}
               </button>
 
               {/* Metric Filters */}
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
                   <span style={{ fontSize: '9px', fontWeight: 900, color: '#475569', letterSpacing: '0.5px' }}>
-                    METRIK-FILTER (ISOLIEREN):
+                    {t('METRIC FILTERS (ISOLATE):', 'METRIK-FILTER (ISOLIEREN):', 'FILTRES MÉTRIQUES (ISOLER) :')}
                   </span>
                   {activeMetricFilter && (
                     <button
@@ -2189,7 +2345,7 @@ export default function App() {
                       textAlign: 'left'
                     }}
                   >
-                    {stats.subjekte.toLocaleString()} SUBJEKTE
+                    {stats.subjekte.toLocaleString()} {t('OBJECTS', 'SUBJEKTE', 'OBJETS')}
                   </button>
 
                   <button
@@ -2205,7 +2361,7 @@ export default function App() {
                       textAlign: 'left'
                     }}
                   >
-                    {stats.raub_kanten.toLocaleString()} RAUB
+                    {stats.raub_kanten.toLocaleString()} {t('LOOT', 'RAUB', 'PILLAGE')}
                   </button>
 
                   <button
@@ -2221,7 +2377,7 @@ export default function App() {
                       textAlign: 'left'
                     }}
                   >
-                    {stats.schenk_kanten.toLocaleString()} SCHENKUNG
+                    {stats.schenk_kanten.toLocaleString()} {t('DONATION', 'SCHENKUNG', 'DON')}
                   </button>
 
                   <button
@@ -2237,7 +2393,7 @@ export default function App() {
                       textAlign: 'left'
                     }}
                   >
-                    {stats.contested_objekte.toLocaleString()} DISSONANZ
+                    {stats.contested_objekte.toLocaleString()} {t('DISSONANCE', 'DISSONANZ', 'DISSONANCE')}
                   </button>
 
                   <button
@@ -2253,7 +2409,7 @@ export default function App() {
                       textAlign: 'left'
                     }}
                   >
-                    {(stats.provenienz_luecken || 83).toLocaleString()} LÜCKEN
+                    {(stats.provenienz_luecken || 83).toLocaleString()} {t('GAPS', 'LÜCKEN', 'LACUNES')}
                   </button>
 
                   <button
@@ -2269,7 +2425,7 @@ export default function App() {
                       textAlign: 'left'
                     }}
                   >
-                    {(stats.verdacht_kanten || suspicions.length || 36).toLocaleString()} VERDACHT
+                    {(stats.verdacht_kanten || suspicions.length || 36).toLocaleString()} {t('SUSPICION', 'VERDACHT', 'SOUPÇON')}
                   </button>
 
                   <button
@@ -2285,7 +2441,7 @@ export default function App() {
                       textAlign: 'left'
                     }}
                   >
-                    {stats.akteure} AKTEURE
+                    {stats.akteure} {t('ACTORS', 'AKTEURE', 'ACTEURS')}
                   </button>
 
                   <button
@@ -2301,7 +2457,7 @@ export default function App() {
                       textAlign: 'left'
                     }}
                   >
-                    {stats.institutionen} DEPOTS
+                    {stats.institutionen} {t('DEPOTS', 'DEPOTS', 'DÉPÔTS')}
                   </button>
                 </div>
               </div>
@@ -2309,7 +2465,7 @@ export default function App() {
               {/* Quellen */}
               <div>
                 <span style={{ fontSize: '9px', fontWeight: 900, color: '#475569', letterSpacing: '0.5px' }}>
-                  QUELLEN:
+                  {t('SOURCES:', 'QUELLEN:', 'SOURCES :')}
                 </span>
                 <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', marginTop: '4px' }}>
                   {publications.map((pub: any) => {
@@ -2344,13 +2500,18 @@ export default function App() {
       {/* 2. MAIN 3-COLUMN WORKSPACE */}
       <div className="app-workspace" style={{ flex: 1, display: 'flex', width: '100%', overflow: 'hidden', position: 'relative' }}>
         
-        {/* COLUMN 1: LEFT SIDEBAR (SCHNELLFILTER) */}
+        {mobileSidebarOpen && (
+          <div className="mobile-sidebar-backdrop" onClick={() => setMobileSidebarOpen(false)} />
+        )}
+
+        {/* COLUMN 1: LEFT SIDEBAR (SCHNELLFILTER — Archival Index) */}
+        {(viewMode === 'graph' || viewMode === 'map' || mobileSidebarOpen) && (
         <aside
-          className="left-sidebar"
+          className={`left-sidebar${mobileSidebarOpen ? ' mobile-open' : ''}`}
           style={{
-            width: sidebarOpen ? '320px' : '44px',
+            width: sidebarOpen || mobileSidebarOpen ? '316px' : '42px',
             height: '100%',
-            borderRight: '3px solid #000000',
+            borderRight: '1px solid #D8D5CD',
             backgroundColor: '#FFFFFF',
             display: 'flex',
             flexDirection: 'column',
@@ -2361,56 +2522,60 @@ export default function App() {
           }}
         >
           {/* Collapsed Strip */}
-          {!sidebarOpen && (
+          {!sidebarOpen && !mobileSidebarOpen && (
             <div
-              style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: '16px', cursor: 'pointer' }}
+              style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: '14px', cursor: 'pointer', backgroundColor: '#F7F6F2' }}
               onClick={() => setSidebarOpen(true)}
-              title="Schnellfilter öffnen"
+              title={t('Open quick filters', 'Schnellfilter öffnen', 'Ouvrir les filtres rapides')}
             >
-              <button style={{ border: '2px solid #000000', background: '#FFFFFF', fontWeight: 'bold', fontSize: '10px', padding: '4px 6px', cursor: 'pointer' }}>
-                [+]
+              <button style={{ border: '1px solid #D8D5CD', background: '#FFFFFF', color: '#141413', fontWeight: 700, fontSize: '12px', padding: '3px 7px', cursor: 'pointer', borderRadius: '2px' }}>
+                +
               </button>
-              <div style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)', marginTop: '24px', fontSize: '10px', fontWeight: 900, letterSpacing: '1.5px', color: '#000000' }}>
-                SCHNELLFILTER (TÄTER / DEPOTS / LÜCKEN)
+              <div style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)', marginTop: '20px', fontSize: '10.5px', fontWeight: 600, letterSpacing: '0.06em', color: '#52514C' }}>
+                {t('Index · Actors / Depots / Gaps', 'Index · Akteure / Depots / Lücken', 'Index · Acteurs / Dépôts / Lacunes')}
               </div>
             </div>
           )}
 
           {/* Expanded Sidebar */}
-          {sidebarOpen && (
+          {(sidebarOpen || mobileSidebarOpen) && (
             <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
               
               {/* Header */}
-              <div style={{ padding: '10px 12px', borderBottom: '2px solid #000000', display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#F8FAFC' }}>
+              <div style={{ padding: '10px 12px', borderBottom: '1px solid #D8D5CD', display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#F7F6F2' }}>
                 <div>
-                  <div style={{ fontSize: '10px', fontWeight: 900, color: '#000000', letterSpacing: '0.5px' }}>
-                    [SCHNELLFILTER]
+                  <div style={{ fontSize: '11.5px', fontWeight: 700, color: '#141413' }}>
+                    {t('Entity Index', 'Entitäten-Index', 'Index des entités')}
                   </div>
-                  <div style={{ fontSize: '8px', color: '#64748B', marginTop: '1px' }}>
-                    1-KLICK ISOLATION IM GRAPHEN
+                  <div style={{ fontSize: '10px', color: '#78766F', marginTop: '1px' }}>
+                    {t('1-click graph isolation', '1-Klick Isolation im Graphen', 'Isolation en 1 clic dans le graphe')}
                   </div>
                 </div>
                 <button
-                  onClick={() => setSidebarOpen(false)}
-                  title="Leiste minimieren"
+                  onClick={() => {
+                    if (mobileSidebarOpen) setMobileSidebarOpen(false);
+                    else setSidebarOpen(false);
+                  }}
+                  title={t('Minimize sidebar', 'Leiste minimieren', 'Réduire le panneau')}
                   style={{
-                    padding: '2px 6px',
+                    padding: '2px 7px',
                     backgroundColor: '#FFFFFF',
-                    border: '1px solid #000000',
-                    fontWeight: 'bold',
-                    fontSize: '10px',
+                    border: '1px solid #D8D5CD',
+                    color: '#52514C',
+                    fontWeight: 600,
+                    fontSize: '11px',
                     cursor: 'pointer'
                   }}
                 >
-                  [-]
+                  {mobileSidebarOpen ? '✕' : '–'}
                 </button>
               </div>
 
               {/* Active Entity Focus Banner */}
               {focusedEntity && (
-                <div style={{ padding: '8px 12px', backgroundColor: '#000000', color: '#FFFFFF', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div style={{ fontSize: '9px', fontWeight: 'bold' }}>
-                    FOKUS: <span style={{ color: focusedEntity.type === 'actor' ? '#F59E0B' : '#60A5FA' }}>{focusedEntity.name.toUpperCase()}</span>
+                <div style={{ padding: '8px 12px', backgroundColor: '#141413', color: '#F7F6F2', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                  <div style={{ fontSize: '11px', fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {t('Focus:', 'Fokus:', 'Focus :')} <span style={{ color: focusedEntity.type === 'actor' ? '#FBBF24' : '#93C5FD' }}>{focusedEntity.name}</span>
                   </div>
                   <button
                     onClick={() => {
@@ -2422,111 +2587,121 @@ export default function App() {
                       }
                     }}
                     style={{
-                      backgroundColor: '#DC2626',
+                      backgroundColor: '#991B1B',
                       color: '#FFFFFF',
                       border: 'none',
-                      padding: '2px 6px',
-                      fontSize: '8px',
-                      fontWeight: 'bold',
-                      cursor: 'pointer'
+                      padding: '2px 7px',
+                      fontSize: '10px',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      flexShrink: 0
                     }}
-                    title="Fokus aufheben und gesamten Atlas zeigen"
+                    title={t('Clear focus and show full atlas', 'Fokus aufheben und gesamten Atlas zeigen', "Lever le focus et afficher l'atlas complet")}
                   >
-                    [RESET]
+                    {t('Clear', 'Aufheben', 'Effacer')}
                   </button>
                 </div>
               )}
 
               {/* Exclusive Cypher Mode Alert */}
               {exclusiveCypherMode && (
-                <div style={{ padding: '6px 10px', backgroundColor: '#FEF2F2', borderBottom: '1px solid #DC2626', fontSize: '8px', color: '#991B1B', fontWeight: 'bold' }}>
-                  [EXKLUSIV-CYPHER AKTIV: NUR KNOTEN DIESER ENTITÄT]
+                <div style={{ padding: '6px 12px', backgroundColor: '#FEF2F2', borderBottom: '1px solid #F3D1D1', fontSize: '10.5px', color: '#991B1B', fontWeight: 600 }}>
+                  {t(
+                    'Exclusive subgraph active (entity nodes only)',
+                    'Exklusiv-Subgraph aktiv (nur Knoten dieser Entität)',
+                    'Sous-graphe exclusif actif (nœuds de cette entité uniquement)'
+                  )}
                 </div>
               )}
 
-              {/* 3 Tabs: TÄTER, DEPOTS, LÜCKEN */}
-              <div style={{ display: 'flex', borderBottom: '2px solid #000000' }}>
+              {/* 4 Tabs: Actors, Depots, Gaps, POIs */}
+              <div style={{ display: 'flex', borderBottom: '1px solid #D8D5CD', backgroundColor: '#F7F6F2' }}>
                 <button
                   onClick={() => setSidebarTab('actors')}
                   style={{
                     flex: 1,
-                    padding: '7px 4px',
-                    fontSize: '8px',
-                    fontWeight: 900,
-                    backgroundColor: sidebarTab === 'actors' ? '#000000' : '#FFFFFF',
-                    color: sidebarTab === 'actors' ? '#FFFFFF' : '#000000',
+                    padding: '8px 4px',
+                    fontSize: '10.5px',
+                    fontWeight: 600,
+                    backgroundColor: sidebarTab === 'actors' ? '#FFFFFF' : 'transparent',
+                    color: sidebarTab === 'actors' ? '#141413' : '#52514C',
                     border: 'none',
-                    borderRight: '1px solid #000000',
+                    borderBottom: sidebarTab === 'actors' ? '2px solid #141413' : '2px solid transparent',
                     cursor: 'pointer'
                   }}
                 >
-                  TÄTER ({filterEntities.actors.length})
+                  {t('Actors', 'Akteure', 'Acteurs')} <span className="mono" style={{ fontSize: '9.5px', opacity: 0.7 }}>{filterEntities.actors.length}</span>
                 </button>
                 <button
                   onClick={() => setSidebarTab('depots')}
                   style={{
                     flex: 1,
-                    padding: '7px 4px',
-                    fontSize: '8px',
-                    fontWeight: 900,
-                    backgroundColor: sidebarTab === 'depots' ? '#000000' : '#FFFFFF',
-                    color: sidebarTab === 'depots' ? '#FFFFFF' : '#000000',
+                    padding: '8px 4px',
+                    fontSize: '10.5px',
+                    fontWeight: 600,
+                    backgroundColor: sidebarTab === 'depots' ? '#FFFFFF' : 'transparent',
+                    color: sidebarTab === 'depots' ? '#141413' : '#52514C',
                     border: 'none',
-                    borderRight: '1px solid #000000',
+                    borderBottom: sidebarTab === 'depots' ? '2px solid #141413' : '2px solid transparent',
                     cursor: 'pointer'
                   }}
                 >
-                  DEPOTS ({filterEntities.institutions.length})
+                  {t('Depots', 'Depots', 'Dépôts')} <span className="mono" style={{ fontSize: '9.5px', opacity: 0.7 }}>{filterEntities.institutions.length}</span>
                 </button>
                 <button
                   onClick={() => setSidebarTab('gaps')}
                   style={{
                     flex: 1,
-                    padding: '7px 4px',
-                    fontSize: '8px',
-                    fontWeight: 900,
-                    backgroundColor: sidebarTab === 'gaps' ? '#7C3AED' : '#FFFFFF',
-                    color: sidebarTab === 'gaps' ? '#FFFFFF' : '#7C3AED',
+                    padding: '8px 4px',
+                    fontSize: '10.5px',
+                    fontWeight: 600,
+                    backgroundColor: sidebarTab === 'gaps' ? '#FFFFFF' : 'transparent',
+                    color: sidebarTab === 'gaps' ? '#5B21B6' : '#52514C',
                     border: 'none',
-                    borderRight: '1px solid #000000',
+                    borderBottom: sidebarTab === 'gaps' ? '2px solid #5B21B6' : '2px solid transparent',
                     cursor: 'pointer'
                   }}
                 >
-                  LÜCKEN ({gapItems.length || stats.provenienz_luecken})
+                  {t('Gaps', 'Lücken', 'Lacunes')} <span className="mono" style={{ fontSize: '9.5px', opacity: 0.7 }}>{gapItems.length || stats.provenienz_luecken}</span>
                 </button>
                 <button
                   onClick={() => setSidebarTab('pois')}
                   style={{
                     flex: 1,
-                    padding: '7px 4px',
-                    fontSize: '8px',
-                    fontWeight: 900,
-                    backgroundColor: sidebarTab === 'pois' ? '#0F766E' : '#FFFFFF',
-                    color: sidebarTab === 'pois' ? '#FFFFFF' : '#0F766E',
+                    padding: '8px 4px',
+                    fontSize: '10.5px',
+                    fontWeight: 600,
+                    backgroundColor: sidebarTab === 'pois' ? '#FFFFFF' : 'transparent',
+                    color: sidebarTab === 'pois' ? '#155E75' : '#52514C',
                     border: 'none',
+                    borderBottom: sidebarTab === 'pois' ? '2px solid #155E75' : '2px solid transparent',
                     cursor: 'pointer'
                   }}
                 >
-                  POIs ({pinnedPois.length})
+                  POIs <span className="mono" style={{ fontSize: '9.5px', opacity: 0.7 }}>{pinnedPois.length}</span>
                 </button>
               </div>
 
               {/* Tab Search Filter */}
-              <div style={{ padding: '6px 10px', borderBottom: '1px solid #E2E8F0', backgroundColor: '#F8FAFC' }}>
+              <div style={{ padding: '8px 10px', borderBottom: '1px solid #ECEAE4', backgroundColor: '#FFFFFF' }}>
                 <input
                   type="text"
-                  placeholder={sidebarTab === 'actors' ? "TÄTER FILTERN..." : (sidebarTab === 'depots' ? "DEPOT FILTERN..." : "INVENTARNR / SUBJEKT...")}
+                  placeholder={sidebarTab === 'actors'
+                    ? t('Filter actors…', 'Akteure filtern…', 'Filtrer les acteurs…')
+                    : (sidebarTab === 'depots'
+                        ? t('Filter depots…', 'Depots filtern…', 'Filtrer les dépôts…')
+                        : t('Inventory no. / object…', 'Inventarnr. / Objekt…', "N° d'inv. / objet…"))}
                   value={sidebarSearch}
                   onChange={(e) => setSidebarSearch(e.target.value)}
                   style={{
                     width: '100%',
-                    padding: '4px 6px',
-                    fontSize: '9px',
-                    fontWeight: 'bold',
-                    border: '1px solid #000000',
+                    padding: '5px 8px',
+                    fontSize: '11px',
+                    border: '1px solid #D8D5CD',
+                    borderRadius: '2px',
                     outline: 'none',
-                    backgroundColor: '#FFFFFF',
-                    fontFamily: "'Space Mono', monospace"
+                    backgroundColor: '#F7F6F2',
+                    color: '#141413'
                   }}
                 />
               </div>
@@ -2562,7 +2737,7 @@ export default function App() {
                                 fontWeight: 'bold'
                               }}
                             >
-                              {actor.raub_count} RAUB
+                              {actor.raub_count} {t('LOOT', 'RAUB', 'PILLÉS')}
                             </span>
                           </div>
                           <div style={{ fontSize: '8px', color: isFocused ? '#94A3B8' : '#64748B', marginTop: '2px' }}>
@@ -2608,11 +2783,11 @@ export default function App() {
                                 fontWeight: 'bold'
                               }}
                             >
-                              {inst.count} SUBJEKTE
+                              {inst.count} {t('OBJECTS', 'SUBJEKTE', 'OBJETS')}
                             </span>
                           </div>
                           <div style={{ fontSize: '8px', color: isFocused ? '#94A3B8' : '#64748B', marginTop: '2px' }}>
-                            Stadt: {inst.stadt || 'Unbekannt'} | {inst.contested_count} Dissonanzen ({Math.round((inst.contested_count / (inst.count || 1)) * 100)}%)
+                            {t('City:', 'Stadt:', 'Ville :')} {inst.stadt || t('Unknown', 'Unbekannt', 'Inconnue')} | {inst.contested_count} {t('dissonances', 'Dissonanzen', 'dissonances')} ({Math.round((inst.contested_count / (inst.count || 1)) * 100)}%)
                           </div>
                         </div>
                       );
@@ -2637,7 +2812,7 @@ export default function App() {
                           cursor: 'pointer'
                         }}
                       >
-                        ALLE ({gapItems.length})
+                        {t('ALL', 'ALLE', 'TOUT')} ({gapItems.length})
                       </button>
                       <button
                         onClick={() => setGapFilter('suspicion')}
@@ -2652,7 +2827,7 @@ export default function App() {
                           cursor: 'pointer'
                         }}
                       >
-                        VERDACHT ({suspicions.length})
+                        {t('SUSPICION', 'VERDACHT', 'SOUPÇON')} ({suspicions.length})
                       </button>
                       <button
                         onClick={() => setGapFilter('unresolved')}
@@ -2667,7 +2842,7 @@ export default function App() {
                           cursor: 'pointer'
                         }}
                       >
-                        LÜCKEN ({Math.max(0, gapItems.length - suspicions.length)})
+                        {t('GAPS', 'LÜCKEN', 'LACUNES')} ({Math.max(0, gapItems.length - suspicions.length)})
                       </button>
                     </div>
 
@@ -2680,6 +2855,8 @@ export default function App() {
                         <div
                           key={gapId}
                           onClick={() => {
+                            setMobileSidebarOpen(false);
+                            setViewMode('graph');
                             const node = graphData.nodes.find(n => n.id === gapId);
                             if (node) {
                               setSelectedLink(null);
@@ -2714,7 +2891,7 @@ export default function App() {
                                 fontWeight: 'bold'
                               }}
                             >
-                              {gap.institution || gap.museum || 'Museumsdepot'}
+                              {gap.institution || gap.museum || t('Museum Depot', 'Museumsdepot', 'Dépôt muséal')}
                             </span>
                           </div>
                           <div style={{ fontSize: '8px', color: '#334155', marginTop: '2px', fontWeight: 'bold' }}>
@@ -2723,7 +2900,7 @@ export default function App() {
                           {susp ? (
                             <div style={{ marginTop: '3px' }}>
                               <div style={{ fontSize: '8px', color: '#0891B2', fontWeight: 'bold' }}>
-                                [VERDACHT: {susp.akteur} ({Math.round((susp.confidence || 0.9) * 100)}%)]
+                                [{t('SUSPICION', 'VERDACHT', 'SOUPÇON')}: {susp.akteur} ({Math.round((susp.confidence || 0.9) * 100)}%)]
                               </div>
                               <div style={{ fontSize: '7.5px', color: '#64748B', fontStyle: 'italic' }}>
                                 {susp.expedition}
@@ -2731,7 +2908,11 @@ export default function App() {
                             </div>
                           ) : (
                             <div style={{ fontSize: '8px', color: '#64748B', marginTop: '1px', fontStyle: 'italic' }}>
-                              Kein historischer Akteur verzeichnet (Depot-Blackbox)
+                              {t(
+                                'No historical actor recorded (Depot Blackbox)',
+                                'Kein historischer Akteur verzeichnet (Depot-Blackbox)',
+                                'Aucun acteur historique recensé (Boîte noire muséale)'
+                              )}
                             </div>
                           )}
                         </div>
@@ -2743,11 +2924,19 @@ export default function App() {
                 {sidebarTab === 'pois' && (
                   <div style={{ display: 'flex', flexDirection: 'column' }}>
                     <div style={{ padding: '6px 10px', backgroundColor: '#F0FDFA', borderBottom: '1px solid #0F766E', fontSize: '8px', color: '#115E59', fontWeight: 'bold' }}>
-                      GEMERKTE LEITOBJEKTE (FALLAKTE FUER GEZIELTE RESTITUTION)
+                      {t(
+                        'PINNED KEY OBJECTS (CASE WATCHLIST FOR TARGETED RESTITUTION)',
+                        'GEMERKTE LEITOBJEKTE (FALLAKTE FUER GEZIELTE RESTITUTION)',
+                        'OBJETS PHARES ÉPINGLÉS (DOSSIER DE SUIVI POUR RESTITUTION CIBLÉE)'
+                      )}
                     </div>
                     {pinnedPois.length === 0 && (
                       <div style={{ padding: '16px 12px', fontSize: '8.5px', color: '#64748B', textAlign: 'center' }}>
-                        Keine Leitobjekte gepinnt. Waehle ein Subjekt im Graphen und klicke rechts auf [+ IN FALLAKTE MERKEN].
+                        {t(
+                          'No key objects pinned. Select an object in the graph and click [+ PIN AS KEY OBJECT] on the right.',
+                          'Keine Leitobjekte gepinnt. Waehle ein Subjekt im Graphen und klicke rechts auf [+ IN FALLAKTE MERKEN].',
+                          'Aucun objet phare épinglé. Sélectionnez un objet dans le graphe puis cliquez à droite sur [+ ÉPINGLER COMME OBJET PHARE].'
+                        )}
                       </div>
                     )}
                     {pinnedPois.map((poi) => {
@@ -2756,6 +2945,7 @@ export default function App() {
                         <div
                           key={poi.id}
                           onClick={() => {
+                            setMobileSidebarOpen(false);
                             const node = graphData.nodes.find((n: any) => n.id === poi.id || n.label === poi.label);
                             if (node) {
                               setViewMode('graph');
@@ -2766,7 +2956,8 @@ export default function App() {
                                 fgRef.current.zoom(2.8, 700);
                               }
                             } else {
-                              setSelectedNode({ id: poi.id, label: poi.label, type: 'Subjekt', desc: poi.desc });
+                              setViewMode('graph');
+                              setSelectedNode({ id: poi.id, label: poi.label, type: 'Subjekt', desc: localizePoiDesc(poi, lang) });
                             }
                           }}
                           style={{
@@ -2786,7 +2977,7 @@ export default function App() {
                               [X]
                             </button>
                           </div>
-                          <div style={{ fontSize: '8px', color: '#334155', marginTop: '2px' }}>{poi.desc}</div>
+                          <div style={{ fontSize: '8px', color: '#334155', marginTop: '2px' }}>{localizePoiDesc(poi, lang)}</div>
                         </div>
                       );
                     })}
@@ -2797,6 +2988,7 @@ export default function App() {
             </div>
           )}
         </aside>
+        )}
 
         {/* COLUMN 2: CENTER CANVAS CONTAINER (RESIZES DYNAMICALLY VIA RESIZEOBSERVER) */}
         <main
@@ -2807,54 +2999,56 @@ export default function App() {
             height: '100%',
             position: 'relative',
             overflow: 'hidden',
-            backgroundColor: '#FFFFFF'
+            backgroundColor: '#FBFBF9'
           }}
         >
           {viewMode === 'graph' ? (
-            <ForceGraph2D
-              ref={fgRef}
-              width={canvasDimensions.width}
-              height={canvasDimensions.height}
-              graphData={graphData}
-              backgroundColor="#FFFFFF"
-              nodeCanvasObject={nodeCanvasObject}
-              nodePointerAreaPaint={(node, color, ctx) => {
-                ctx.fillStyle = color;
-                ctx.beginPath();
-                ctx.arc(node.x, node.y, 9, 0, 2 * Math.PI, false);
-                ctx.fill();
-              }}
-              linkColor={linkColor}
-              linkWidth={linkWidth}
-              linkCurvature={(link: any) => link.curvature || 0}
-              linkCanvasObjectMode={(link: any) => link.type === 'VERDACHT_AUF' ? 'replace' : undefined}
-              linkCanvasObject={linkCanvasObject}
-              onNodeClick={(node) => {
-                setSelectedLink(null);
-                setSelectedRoute(null);
-                setSelectedNode(node);
-                if (fgRef.current) {
-                  fgRef.current.centerAt(node.x, node.y, 600);
-                  fgRef.current.zoom(2.5, 600);
-                }
-              }}
-              onLinkClick={(link) => {
-                setSelectedNode(null);
-                setSelectedRoute(null);
-                setSelectedLink(link);
-              }}
-              onLinkHover={(link) => setHoveredLink(link)}
-              onBackgroundClick={() => {
-                setSelectedNode(null);
-                setSelectedLink(null);
-                setSelectedRoute(null);
-              }}
-              onEngineStop={handleEngineStop}
-              onNodeDragEnd={handleNodeDragEnd}
-              cooldownTicks={graphData.nodes.length > 0 && graphData.nodes[0].fx !== undefined ? 0 : 120}
-              d3AlphaDecay={0.02}
-              d3VelocityDecay={0.3}
-            />
+            <div className="graph-canvas-wrap" style={{ width: '100%', height: '100%' }}>
+              <ForceGraph2D
+                ref={fgRef}
+                width={canvasDimensions.width}
+                height={canvasDimensions.height}
+                graphData={graphData}
+                backgroundColor="#FBFBF9"
+                nodeCanvasObject={nodeCanvasObject}
+                nodePointerAreaPaint={(node, color, ctx) => {
+                  ctx.fillStyle = color;
+                  ctx.beginPath();
+                  ctx.arc(node.x, node.y, 9, 0, 2 * Math.PI, false);
+                  ctx.fill();
+                }}
+                linkColor={linkColor}
+                linkWidth={linkWidth}
+                linkCurvature={(link: any) => link.curvature || 0}
+                linkCanvasObjectMode={(link: any) => link.type === 'VERDACHT_AUF' ? 'replace' : undefined}
+                linkCanvasObject={linkCanvasObject}
+                onNodeClick={(node) => {
+                  setSelectedLink(null);
+                  setSelectedRoute(null);
+                  setSelectedNode(node);
+                  if (fgRef.current) {
+                    fgRef.current.centerAt(node.x, node.y, 600);
+                    fgRef.current.zoom(2.5, 600);
+                  }
+                }}
+                onLinkClick={(link) => {
+                  setSelectedNode(null);
+                  setSelectedRoute(null);
+                  setSelectedLink(link);
+                }}
+                onLinkHover={(link) => setHoveredLink(link)}
+                onBackgroundClick={() => {
+                  setSelectedNode(null);
+                  setSelectedLink(null);
+                  setSelectedRoute(null);
+                }}
+                onEngineStop={handleEngineStop}
+                onNodeDragEnd={handleNodeDragEnd}
+                cooldownTicks={graphData.nodes.length > 0 && graphData.nodes[0].fx !== undefined ? 0 : 120}
+                d3AlphaDecay={0.02}
+                d3VelocityDecay={0.3}
+              />
+            </div>
           ) : viewMode === 'map' ? (
             <GeodataMap
               activeMetricFilter={activeMetricFilter}
@@ -2877,29 +3071,83 @@ export default function App() {
               }}
               selectedRouteId={selectedRoute?.id}
             />
+          ) : viewMode === 'docs' ? (
+            <DocumentsView
+              publications={publications}
+              selectedPubs={selectedPubs}
+              onTogglePublication={togglePublication}
+              onDeletePublication={handleDeletePublication}
+              graphLinks={graphData.links}
+              isResearcher={isResearcher}
+              isStaticMode={isStaticSnapshotMode()}
+              onJumpToNode={(nodeId) => {
+                setViewMode('graph');
+                setSelectedLink(null);
+                setSelectedRoute(null);
+                const found = graphData.nodes.find((n: any) => n.id === nodeId || n.label === nodeId);
+                setSelectedNode(found || { id: nodeId, label: nodeId, type: 'Subjekt', desc: '' });
+                setTimeout(() => {
+                  if (found && fgRef.current && found.x !== undefined) {
+                    fgRef.current.centerAt(found.x, found.y, 700);
+                    fgRef.current.zoom(2.6, 700);
+                  }
+                }, 150);
+              }}
+              onJumpToLink={(link) => {
+                setViewMode('graph');
+                setSelectedNode(null);
+                setSelectedRoute(null);
+                setSelectedLink(link);
+              }}
+              onSourceIngested={(newPubId) => {
+                loadPublications(newPubId);
+                loadFilterEntities();
+                loadStats();
+                setTimeout(() => loadGraph(), 200);
+              }}
+              onRequestLogin={() => { setShowLoginModal(true); setLoginError(t('Researcher authorization required.', 'Forscher-Autorisierung erforderlich.', 'Autorisation chercheur requise.')); }}
+              getAuthHeaders={getAuthHeaders}
+            />
           ) : (
             <VisualForensicsView
               isResearcher={isResearcher}
               getAuthHeaders={getAuthHeaders}
-              onRequestLogin={() => { setShowLoginModal(true); setLoginError('Forscher-Autorisierung erforderlich.'); }}
-              onChainCommitted={() => {
-                loadPublications();
+              onRequestLogin={() => { setShowLoginModal(true); setLoginError(t('Researcher authorization required.', 'Forscher-Autorisierung erforderlich.', 'Autorisation chercheur requise.')); }}
+              onChainCommitted={(newPubId) => {
+                loadPublications(newPubId);
                 loadFilterEntities();
-                loadGraph();
+                loadStats();
+                setTimeout(() => loadGraph(), 200);
+              }}
+              onJumpToObject={(invId) => {
+                setViewMode('graph');
+                setSelectedLink(null);
+                setSelectedRoute(null);
+                const found = graphData.nodes.find((n: any) => n.id === invId || n.label === invId);
+                setSelectedNode(found || { id: invId, label: invId, type: 'Subjekt', desc: '' });
+                setTimeout(() => {
+                  if (found && fgRef.current && found.x !== undefined) {
+                    fgRef.current.centerAt(found.x, found.y, 700);
+                    fgRef.current.zoom(2.6, 700);
+                  }
+                }, 150);
               }}
             />
           )}
 
           {/* Kiosk Mode Floating HUD */}
           {kioskMode && (
-            <div style={{ position: 'absolute', top: 16, left: '50%', transform: 'translateX(-50%)', backgroundColor: '#000000', color: '#F59E0B', border: '2px solid #F59E0B', boxShadow: '4px 4px 0px rgba(0,0,0,0.4)', padding: '8px 16px', zIndex: 35, display: 'flex', alignItems: 'center', gap: '12px', fontSize: '10px', fontWeight: 900, letterSpacing: '0.5px' }}>
-              <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#F59E0B', display: 'inline-block' }}></span>
-              <span>MUSEUM-KIOSK AUTOPILOT AKTIV — FOKUS: {kioskTargetId || 'TRAVERSIERE BEWEISGUT'}</span>
+            <div style={{ position: 'absolute', top: 14, left: '50%', transform: 'translateX(-50%)', backgroundColor: 'rgba(20, 20, 19, 0.94)', color: '#F7F6F2', border: '1px solid rgba(251, 191, 36, 0.5)', borderRadius: '2px', padding: '7px 14px', zIndex: 35, display: 'flex', alignItems: 'center', gap: '10px', fontSize: '11px', fontWeight: 600 }}>
+              <span style={{ width: '7px', height: '7px', borderRadius: '50%', backgroundColor: '#F59E0B', display: 'inline-block' }}></span>
+              <span>
+                {t('Museum tour active — Focus:', 'Museums-Tour aktiv — Fokus:', 'Visite muséale active — Focus :')}{' '}
+                <strong className="mono" style={{ color: '#FBBF24' }}>{kioskTargetId || t('Traversing records', 'Durchlaufe Beweisgut', 'Parcours des preuves')}</strong>
+              </span>
               <button
                 onClick={() => setKioskMode(false)}
-                style={{ backgroundColor: '#DC2626', color: '#FFFFFF', border: 'none', padding: '2px 8px', fontSize: '8px', fontWeight: 'bold', cursor: 'pointer' }}
+                style={{ backgroundColor: '#991B1B', color: '#FFFFFF', border: 'none', borderRadius: '2px', padding: '3px 8px', fontSize: '10px', fontWeight: 600, cursor: 'pointer' }}
               >
-                [PAUSE]
+                {t('Pause', 'Pause', 'Pause')}
               </button>
             </div>
           )}
@@ -2907,9 +3155,13 @@ export default function App() {
           {/* Loading Overlay */}
           {loading && (
             <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', zIndex: 50 }}>
-              <div className="brutalist-border" style={{ padding: '20px 30px', textAlign: 'center', backgroundColor: '#FFFFFF' }}>
-                <h2 style={{ margin: 0, fontSize: '12px', letterSpacing: '0.5px' }}>[SYNCHRONISIERE BEWEISNETZWERK...]</h2>
-                <p style={{ margin: '6px 0 0 0', fontSize: '10px', color: '#64748B' }}>Traversiere Neo4j Graph-Datenbank...</p>
+              <div style={{ padding: '18px 26px', textAlign: 'center', backgroundColor: '#FFFFFF', border: '1px solid #1C1B19', boxShadow: '0 8px 24px rgba(20,20,19,0.12)', borderRadius: '2px' }}>
+                <h2 style={{ margin: 0, fontSize: '13px', fontWeight: 700, color: '#141413' }}>
+                  {t('Loading provenance network…', 'Lade Provenienz-Netzwerk…', 'Chargement du réseau de provenance…')}
+                </h2>
+                <p style={{ margin: '6px 0 0 0', fontSize: '11px', color: '#78766F' }}>
+                  {t('Indexing archival records and relations', 'Indiziere Archivbelege und Relationen', 'Indexation des archives et relations')}
+                </p>
               </div>
             </div>
           )}
@@ -2917,64 +3169,66 @@ export default function App() {
           {/* Error Overlay */}
           {error && (
             <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', zIndex: 50 }}>
-              <div className="brutalist-border" style={{ padding: '20px 30px', backgroundColor: '#FEF2F2', borderColor: '#DC2626' }}>
-                <h2 style={{ margin: 0, fontSize: '12px', color: '#DC2626' }}>[VERBINDUNGSFEHLER]</h2>
-                <p style={{ margin: '6px 0 0 0', fontSize: '10px', color: '#991B1B' }}>{error}</p>
+              <div style={{ padding: '18px 26px', backgroundColor: '#FEF2F2', border: '1px solid #991B1B', borderLeft: '3px solid #991B1B', borderRadius: '2px' }}>
+                <h2 style={{ margin: 0, fontSize: '13px', fontWeight: 700, color: '#991B1B' }}>
+                  {t('Connection notice', 'Verbindungshinweis', 'Avis de connexion')}
+                </h2>
+                <p style={{ margin: '6px 0 0 0', fontSize: '11.5px', color: '#7F1D1D' }}>{error}</p>
               </div>
             </div>
           )}
 
           {/* Floating Legende (Unten Links im Canvas) */}
           {viewMode === 'graph' && (
-          <div className="ui-overlay" style={{ position: 'absolute', bottom: 16, left: 16, padding: '8px 12px', backgroundColor: 'rgba(255, 255, 255, 0.95)', border: '2px solid #000000', boxShadow: '3px 3px 0px #000000', display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', zIndex: 20 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '9px', fontWeight: 'bold' }}>
-              <span style={{ width: '9px', height: '9px', borderRadius: '50%', backgroundColor: '#000000', display: 'inline-block' }}></span>
-              DEPOT
+          <div className="ui-overlay" style={{ position: 'absolute', bottom: 14, left: 14, padding: '7px 12px', backgroundColor: 'rgba(255, 255, 255, 0.94)', border: '1px solid #D8D5CD', borderRadius: '2px', display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap', zIndex: 20, backdropFilter: 'blur(4px)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '10.5px', fontWeight: 500, color: '#3F3E3A' }}>
+              <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#141413', display: 'inline-block' }}></span>
+              {t('Depot', 'Depot', 'Dépôt')}
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '9px', fontWeight: 'bold' }}>
-              <span style={{ width: '9px', height: '9px', borderRadius: '50%', backgroundColor: '#B45309', display: 'inline-block' }}></span>
-              TÄTER
+            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '10.5px', fontWeight: 500, color: '#3F3E3A' }}>
+              <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#9A3412', display: 'inline-block' }}></span>
+              {t('Actor', 'Akteur', 'Acteur')}
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '9px', fontWeight: 'bold' }}>
-              <span style={{ width: '9px', height: '9px', borderRadius: '50%', backgroundColor: '#475569', display: 'inline-block' }}></span>
-              SUBJEKT
+            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '10.5px', fontWeight: 500, color: '#3F3E3A' }}>
+              <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#52514C', display: 'inline-block' }}></span>
+              {t('Object', 'Objekt', 'Objet')}
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '9px', fontWeight: 'bold' }}>
-              <span style={{ width: '9px', height: '9px', borderRadius: '50%', backgroundColor: '#CA8A04', display: 'inline-block' }}></span>
-              DISSONANZ
+            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '10.5px', fontWeight: 500, color: '#3F3E3A' }}>
+              <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#CA8A04', display: 'inline-block' }}></span>
+              {t('Dissonance', 'Dissonanz', 'Dissonance')}
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '9px', fontWeight: 'bold' }}>
-              <span style={{ width: '9px', height: '9px', borderRadius: '50%', backgroundColor: '#7C3AED', display: 'inline-block' }}></span>
-              LÜCKE (OHNE AKTEUR)
+            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '10.5px', fontWeight: 500, color: '#3F3E3A' }}>
+              <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#6D28D9', display: 'inline-block' }}></span>
+              {t('Gap', 'Lücke', 'Lacune')}
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '9px', fontWeight: 'bold' }}>
-              <span style={{ width: '9px', height: '9px', borderRadius: '50%', backgroundColor: '#DC2626', display: 'inline-block' }}></span>
-              GHOST (VERSCHOLLEN)
+            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '10.5px', fontWeight: 500, color: '#3F3E3A' }}>
+              <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#DC2626', display: 'inline-block' }}></span>
+              {t('Missing', 'Verschollen', 'Disparu')}
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '9px', fontWeight: 'bold' }}>
-              <span style={{ width: '14px', height: '2px', backgroundColor: '#DC2626', display: 'inline-block' }}></span>
-              RAUB
+            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '10.5px', fontWeight: 500, color: '#3F3E3A' }}>
+              <span style={{ width: '13px', height: '2px', backgroundColor: '#DC2626', display: 'inline-block' }}></span>
+              {t('Loot', 'Raub', 'Pillage')}
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '9px', fontWeight: 'bold' }}>
-              <span style={{ width: '14px', height: '2px', backgroundColor: '#2563EB', display: 'inline-block' }}></span>
-              SCHENKUNG
+            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '10.5px', fontWeight: 500, color: '#3F3E3A' }}>
+              <span style={{ width: '13px', height: '2px', backgroundColor: '#2563EB', display: 'inline-block' }}></span>
+              {t('Donation', 'Schenkung', 'Don')}
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '9px', fontWeight: 'bold' }}>
-              <span style={{ width: '14px', height: '2px', borderTop: '2px dashed #0891B2', display: 'inline-block' }}></span>
-              VERDACHT (PROBABILISTISCH)
+            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '10.5px', fontWeight: 500, color: '#3F3E3A' }}>
+              <span style={{ width: '13px', height: '2px', borderTop: '2px dashed #0891B2', display: 'inline-block' }}></span>
+              {t('Suspicion', 'Verdacht', 'Soupçon')}
             </div>
           </div>
           )}
         </main>
 
-        {/* COLUMN 3: RIGHT INSPECTOR (KNOTEN- ODER KANTEN-AKTE) */}
+        {/* COLUMN 3: RIGHT INSPECTOR (ARCHIVAL CASE FILE) */}
         {(selectedNodeDetails || selectedLink || selectedRoute) && (
           <aside
             className="inspector-aside"
             style={{
-              width: '440px',
+              width: '430px',
               height: '100%',
-              borderLeft: '3px solid #000000',
+              borderLeft: '1px solid #1C1B19',
               backgroundColor: '#FFFFFF',
               overflowY: 'auto',
               flexShrink: 0,
@@ -2987,54 +3241,53 @@ export default function App() {
             {selectedNodeDetails && !selectedLink && !selectedRoute && (
               <div>
                 {/* Header & Close */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '3px solid #000000', paddingBottom: '12px', marginBottom: '16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '1px solid #D8D5CD', paddingBottom: '12px', marginBottom: '16px', gap: '10px' }}>
                   <div>
                     <span
+                      className="mono"
                       style={{
                         display: 'inline-block',
                         backgroundColor: gapIds.has(selectedNodeDetails.id)
-                          ? '#7C3AED'
+                          ? '#5B21B6'
                           : (selectedNodeDetails.isContested 
-                              ? '#CA8A04' 
-                              : (selectedNodeDetails.isGhost ? '#DC2626' : (selectedNodeDetails.type === 'Institution' ? '#000000' : '#B45309'))),
+                              ? '#92400E' 
+                              : (selectedNodeDetails.isGhost ? '#991B1B' : (selectedNodeDetails.type === 'Institution' ? '#141413' : '#9A3412'))),
                         color: '#FFFFFF',
-                        padding: '2px 8px',
-                        fontSize: '9px',
-                        fontWeight: 'bold',
-                        letterSpacing: '0.5px',
-                        marginBottom: '4px'
+                        padding: '2px 7px',
+                        fontSize: '9.5px',
+                        fontWeight: 700,
+                        letterSpacing: '0.04em',
+                        marginBottom: '6px'
                       }}
                     >
                       {gapIds.has(selectedNodeDetails.id)
-                        ? '[STATUS: PROVENIENZLÜCKE]'
+                        ? t('Provenance Gap', 'Provenienzlücke', 'Lacune de provenance')
                         : (selectedNodeDetails.isContested 
-                            ? '[STATUS: SEMANTISCHE DISSONANZ]' 
-                            : (selectedNodeDetails.isGhost ? '[STATUS: VERSCHOLLEN / KEIN DEPOT]' : `[ENTITAET: ${selectedNodeDetails.type.toUpperCase()}]`))}
+                            ? t('Semantic Dissonance', 'Semantische Dissonanz', 'Dissonance sémantique') 
+                            : (selectedNodeDetails.isGhost
+                                ? t('Missing / No Depot', 'Verschollen / Kein Depot', 'Disparu / Sans dépôt')
+                                : nodeTypeLabel(selectedNodeDetails.type, lang)))}
                     </span>
-                    <h2 style={{ margin: '4px 0 0 0', fontSize: '15px', fontWeight: 900, wordBreak: 'break-word', color: '#000000' }}>
+                    <h2 style={{ margin: '2px 0 0 0', fontSize: '16px', fontWeight: 700, wordBreak: 'break-word', color: '#141413' }}>
                       {selectedNodeDetails.label}
                     </h2>
                   </div>
                   <button
                     onClick={() => setSelectedNode(null)}
-                    style={{
-                      border: '2px solid #000000',
-                      background: '#FFFFFF',
-                      padding: '4px 8px',
-                      fontWeight: 'bold',
-                      fontSize: '11px',
-                      cursor: 'pointer'
-                    }}
+                    className="archival-btn"
+                    style={{ padding: '4px 9px', fontSize: '11px' }}
                   >
-                    [X]
+                    ✕
                   </button>
                 </div>
 
                 {/* Description & Metadata */}
                 <div style={{ marginBottom: '14px' }}>
-                  <div style={{ fontSize: '9px', color: '#64748B', fontWeight: 'bold' }}>BESCHREIBUNG / HISTORISCHE FUNKTION:</div>
-                  <div style={{ fontSize: '11px', fontWeight: 'bold', marginTop: '2px', color: '#000000' }}>
-                    {selectedNodeDetails.desc || "Keine Zusatzbeschreibung erfasst"}
+                  <div style={{ fontSize: '10px', color: '#78766F', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    {t('Description / Historical Function', 'Beschreibung / Historische Funktion', 'Description / Fonction historique')}
+                  </div>
+                  <div style={{ fontSize: '12.5px', fontWeight: 500, marginTop: '3px', color: '#141413', lineHeight: 1.5 }}>
+                    {selectedNodeDetails.desc || t('No additional description recorded', 'Keine Zusatzbeschreibung erfasst', 'Aucune description supplémentaire enregistrée')}
                   </div>
                 </div>
 
@@ -3043,23 +3296,23 @@ export default function App() {
                   <div style={{ marginBottom: '16px', border: '2px solid #0891B2', padding: '12px', backgroundColor: '#F0FDFA' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
                       <span style={{ fontSize: '10px', fontWeight: 900, color: '#0E7490', letterSpacing: '0.5px' }}>
-                        [AUTONOMER PROVENIENZ-VERDACHT]
+                        {t('[AUTONOMOUS PROVENANCE SUSPICION]', '[AUTONOMER PROVENIENZ-VERDACHT]', '[SOUPÇON AUTONOME DE PROVENANCE]')}
                       </span>
                       <span style={{ backgroundColor: '#0891B2', color: '#FFFFFF', padding: '1px 6px', fontSize: '8px', fontWeight: 'bold' }}>
-                        {Math.round((suspicionMap[selectedNodeDetails.id].confidence || 0.9) * 100)}% KONFIDENZ
+                        {Math.round((suspicionMap[selectedNodeDetails.id].confidence || 0.9) * 100)}% {t('CONFIDENCE', 'KONFIDENZ', 'CONFIANCE')}
                       </span>
                     </div>
                     <div style={{ fontSize: '9px', color: '#0F172A', marginTop: '4px', lineHeight: 1.4 }}>
-                      <b>Verdächtiger Kolonialoffizier:</b> <span style={{ color: '#B45309', fontWeight: 'bold' }}>{suspicionMap[selectedNodeDetails.id].akteur}</span>
+                      <b>{t('Suspected Colonial Officer:', 'Verdächtiger Kolonialoffizier:', 'Officier colonial suspecté :')}</b> <span style={{ color: '#B45309', fontWeight: 'bold' }}>{suspicionMap[selectedNodeDetails.id].akteur}</span>
                     </div>
                     <div style={{ fontSize: '9px', color: '#0F172A', marginTop: '2px' }}>
-                      <b>Militärisches Register:</b> {suspicionMap[selectedNodeDetails.id].expedition} ({suspicionMap[selectedNodeDetails.id].zeit || 'Kolonialzeit'})
+                      <b>{t('Military Register:', 'Militärisches Register:', 'Registre militaire :')}</b> {suspicionMap[selectedNodeDetails.id].expedition} ({suspicionMap[selectedNodeDetails.id].zeit || t('Colonial Era', 'Kolonialzeit', 'Période coloniale')})
                     </div>
                     <div style={{ fontSize: '9px', color: '#0F172A', marginTop: '2px', lineHeight: 1.3 }}>
-                      <b>Forensische Begründung:</b> {suspicionMap[selectedNodeDetails.id].begruendung}
+                      <b>{t('Forensic Rationale:', 'Forensische Begründung:', 'Justification forensique :')}</b> {suspicionMap[selectedNodeDetails.id].begruendung}
                     </div>
                     <div style={{ fontSize: '8px', color: '#334155', marginTop: '6px', fontStyle: 'italic', backgroundColor: '#CCFBF1', padding: '5px 7px', borderLeft: '3px solid #0891B2' }}>
-                      <b>Primärbeleg:</b> {suspicionMap[selectedNodeDetails.id].beleg}
+                      <b>{t('Primary Citation:', 'Primärbeleg:', 'Source primaire :')}</b> {suspicionMap[selectedNodeDetails.id].beleg}
                     </div>
                     {suspicionMap[selectedNodeDetails.id].zitat && (
                       <div style={{ fontSize: '8px', color: '#0E7490', marginTop: '4px', borderLeft: '3px solid #0891B2', paddingLeft: '6px', fontStyle: 'italic' }}>
@@ -3073,31 +3326,41 @@ export default function App() {
                 {gapIds.has(selectedNodeDetails.id) && (
                   <div style={{ marginBottom: '16px', border: '2px solid #7C3AED', padding: '12px', backgroundColor: '#F5F3FF' }}>
                     <div style={{ fontSize: '10px', fontWeight: 900, color: '#6D28D9', letterSpacing: '0.5px' }}>
-                      [BEFUND: PROVENIENZLÜCKE (CHAIN OF CUSTODY GERISSEN)]
+                      {t(
+                        '[FINDING: PROVENANCE GAP (BROKEN CHAIN OF CUSTODY)]',
+                        '[BEFUND: PROVENIENZLÜCKE (CHAIN OF CUSTODY GERISSEN)]',
+                        '[CONSTAT : LACUNE DE PROVENANCE (CHAÎNE ROMPUE)]'
+                      )}
                     </div>
                     <div style={{ fontSize: '9px', color: '#4C1D95', marginTop: '4px', lineHeight: 1.4 }}>
-                      Dieses Subjekt lagert im Depot, besitzt jedoch in den öffentlichen Museumsdaten keinerlei dokumentierten Erwerbsakt, Schenkungsvertrag oder Raubbericht.
+                      {t(
+                        'This object is held in a museum depot but has no documented acquisition record, donation contract, or looting report in public collection data.',
+                        'Dieses Subjekt lagert im Depot, besitzt jedoch in den öffentlichen Museumsdaten keinerlei dokumentierten Erwerbsakt, Schenkungsvertrag oder Raubbericht.',
+                        "Cet objet est conservé en dépôt muséal mais ne dispose d'aucun acte d'acquisition, contrat de don ou rapport de pillage dans les données publiques."
+                      )}
                     </div>
                     <button
                       onClick={() => {
                         const depotLink = selectedNodeDetails.links.find((l: any) => l.type === 'LAGERT_IN');
-                        const depotName = depotLink ? (depotLink.target.label || depotLink.target.id || depotLink.target) : 'Museumsdepot';
+                        const depotName = depotLink ? (depotLink.target.label || depotLink.target.id || depotLink.target) : t('Museum Depot', 'Museumsdepot', 'Dépôt muséal');
                         handleCopyIFG(selectedNodeDetails.id, depotName);
                       }}
                       style={{
                         width: '100%',
                         marginTop: '10px',
                         padding: '8px 12px',
-                        backgroundColor: '#7C3AED',
+                        backgroundColor: '#5B21B6',
                         color: '#FFFFFF',
-                        border: '2px solid #000000',
-                        boxShadow: '2px 2px 0px #000000',
-                        fontSize: '9px',
-                        fontWeight: 'bold',
+                        border: '1px solid #5B21B6',
+                        borderRadius: '2px',
+                        fontSize: '11px',
+                        fontWeight: 600,
                         cursor: 'pointer'
                       }}
                     >
-                      {copySuccess ? '[ANTRAGSTEXT IN ZWISCHENABLAGE KOPIERT!]' : '[IFG-AUSKUNFTSERSUCHEN KOPIEREN (ZUGANGSBÜCHER)]'}
+                      {copySuccess
+                        ? t('Inquiry text copied to clipboard', 'Antragstext in Zwischenablage kopiert', 'Demande copiée dans le presse-papiers')
+                        : t('Copy FOIA / IFG Request (Accession Ledgers)', 'IFG-Auskunftsersuchen kopieren (Zugangsbücher)', "Copier la demande CADA / IFG (Registres d'entrée)")}
                     </button>
                   </div>
                 )}
@@ -3106,18 +3369,26 @@ export default function App() {
                 {selectedNodeDetails.isContested && selectedNodeDetails.contestedInfo && (
                   <div style={{ marginBottom: '18px', border: '2px solid #000000', padding: '12px', backgroundColor: '#FEFCE8' }}>
                     <div style={{ fontSize: '10px', fontWeight: 900, color: '#854D0E', marginBottom: '10px', letterSpacing: '0.5px' }}>
-                      [BEWEIS-DISSONANZ: MULTIGRAPH-KOLLISION]
+                      {t(
+                        '[EVIDENCE DISSONANCE: MULTIGRAPH COLLISION]',
+                        '[BEWEIS-DISSONANZ: MULTIGRAPH-KOLLISION]',
+                        '[DISSONANCE DE PREUVE : COLLISION MULTIGRAPHE]'
+                      )}
                     </div>
 
                     <div style={{ borderLeft: '4px solid #2563EB', paddingLeft: '8px', marginBottom: '10px', backgroundColor: '#EFF6FF', padding: '8px' }}>
                       <div style={{ fontSize: '9px', fontWeight: 'bold', color: '#1D4ED8' }}>
-                        [1] OFFIZIELLES MUSEUMS-NARRATIV (SCHUTZBEHAUPTUNG)
+                        {t(
+                          '[1] OFFICIAL MUSEUM NARRATIVE (EXCULPATORY CLAIM)',
+                          '[1] OFFIZIELLES MUSEUMS-NARRATIV (SCHUTZBEHAUPTUNG)',
+                          '[1] RÉCIT OFFICIEL DU MUSÉE (ALLÉGATION EXCULPATOIRE)'
+                        )}
                       </div>
                       {selectedNodeDetails.contestedInfo.museum_narratives.slice(0, 2).map((m: any, idx: number) => (
                         <div key={idx} style={{ marginTop: '4px', fontSize: '9px' }}>
-                          <div><b>Kante:</b> <span style={{ color: '#1D4ED8' }}>{m.rel}</span> ({m.jahr || 'Kolonialzeit'}) durch <b>{m.akteur}</b></div>
+                          <div><b>{t('Edge:', 'Kante:', 'Arête :')}</b> <span style={{ color: '#1D4ED8' }}>{relLabel(m.rel, lang)}</span> ({m.jahr || t('Colonial Era', 'Kolonialzeit', 'Période coloniale')}) {t('by', 'durch', 'par')} <b>{m.akteur}</b></div>
                           <div style={{ fontSize: '8px', color: '#475569', fontStyle: 'italic', marginTop: '2px' }}>
-                            <b>Beleg:</b> {m.beleg}
+                            <b>{t('Citation:', 'Beleg:', 'Source :')}</b> {m.beleg}
                           </div>
                           <div style={{ fontSize: '8px', color: '#0f172a', marginTop: '3px', backgroundColor: '#DBEAFE', padding: '3px 5px' }}>
                             &ldquo;{m.claim}&rdquo;
@@ -3128,16 +3399,20 @@ export default function App() {
 
                     <div style={{ borderLeft: '4px solid #DC2626', paddingLeft: '8px', backgroundColor: '#FEF2F2', padding: '8px' }}>
                       <div style={{ fontSize: '9px', fontWeight: 'bold', color: '#991B1B' }}>
-                        [2] FORENSISCHE REALITÄT (MILITÄRISCHER RAUBZUG)
+                        {t(
+                          '[2] FORENSIC REALITY (MILITARY LOOTING RAID)',
+                          '[2] FORENSISCHE REALITÄT (MILITÄRISCHER RAUBZUG)',
+                          '[2] RÉALITÉ FORENSIQUE (RAID MILITAIRE DE PILLAGE)'
+                        )}
                       </div>
                       {selectedNodeDetails.contestedInfo.forensic_realities.slice(0, 2).map((f: any, idx: number) => (
                         <div key={idx} style={{ marginTop: '4px', fontSize: '9px' }}>
-                          <div><b>Kante:</b> <span style={{ color: '#DC2626' }}>{f.rel}</span> ({f.jahr || 'Kolonialzeit'}) durch <b>{f.akteur}</b></div>
+                          <div><b>{t('Edge:', 'Kante:', 'Arête :')}</b> <span style={{ color: '#DC2626' }}>{relLabel(f.rel, lang)}</span> ({f.jahr || t('Colonial Era', 'Kolonialzeit', 'Période coloniale')}) {t('by', 'durch', 'par')} <b>{f.akteur}</b></div>
                           <div style={{ fontSize: '8px', color: '#475569', fontStyle: 'italic', marginTop: '2px' }}>
-                            <b>Beleg:</b> {f.beleg}
+                            <b>{t('Citation:', 'Beleg:', 'Source :')}</b> {f.beleg}
                           </div>
                           <div style={{ fontSize: '8px', color: '#7f1d1d', marginTop: '3px', backgroundColor: '#FEE2E2', padding: '3px 5px', fontWeight: 'bold' }}>
-                            Befund: {f.claim}
+                            {t('Finding:', 'Befund:', 'Constat :')} {f.claim}
                           </div>
                         </div>
                       ))}
@@ -3148,7 +3423,7 @@ export default function App() {
                 {/* Verbundene Kanten Liste */}
                 <div style={{ marginBottom: '18px' }}>
                   <div style={{ fontSize: '9px', color: '#64748B', fontWeight: 'bold', marginBottom: '8px' }}>
-                    VERIFIZIERTE BEWEISPFADE IM GRAPHEN ({selectedNodeDetails.links.length}):
+                    {t('VERIFIED EVIDENCE PATHS IN GRAPH', 'VERIFIZIERTE BEWEISPFADE IM GRAPHEN', 'CHEMINS DE PREUVE VÉRIFIÉS DANS LE GRAPHE')} ({selectedNodeDetails.links.length}):
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                     {selectedNodeDetails.links.slice(0, 6).map((lnk: any, idx: number) => {
@@ -3175,11 +3450,11 @@ export default function App() {
                             borderLeft: `4px solid ${borderCol}`,
                             cursor: 'pointer'
                           }}
-                          title="Klicken zum Öffnen der Kanten-Akte"
+                          title={t('Click to open edge record', 'Klicken zum Öffnen der Kanten-Akte', "Cliquer pour ouvrir la fiche de l'arête")}
                         >
                           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '8px' }}>
                             <span style={{ fontWeight: 'bold', color: borderCol }}>
-                              {isOutgoing ? '-> ' : '<- '} {lnk.type}
+                              {isOutgoing ? '-> ' : '<- '} {relLabel(lnk.type, lang)}
                             </span>
                             {lnk.jahr && <span style={{ color: '#64748B' }}>{lnk.jahr}</span>}
                           </div>
@@ -3188,7 +3463,7 @@ export default function App() {
                           </div>
                           {lnk.beleg && (
                             <div style={{ fontSize: '8px', color: '#475569', marginTop: '2px', fontStyle: 'italic' }}>
-                              Beleg: {lnk.beleg}
+                              {t('Citation:', 'Beleg:', 'Source :')} {lnk.beleg}
                             </div>
                           )}
                         </div>
@@ -3196,7 +3471,7 @@ export default function App() {
                     })}
                     {selectedNodeDetails.links.length > 6 && (
                       <div style={{ fontSize: '8px', color: '#64748B', textAlign: 'center', marginTop: '2px' }}>
-                        + {selectedNodeDetails.links.length - 6} weitere verifizierte Kanten
+                        + {selectedNodeDetails.links.length - 6} {t('more verified edges', 'weitere verifizierte Kanten', 'autres arêtes vérifiées')}
                       </div>
                     )}
                   </div>
@@ -3208,31 +3483,32 @@ export default function App() {
                 {(selectedNodeDetails && (selectedNodeDetails.type === 'Subjekt' || selectedNodeDetails.type === 'Objekt')) && (
                   <div style={{
                     marginBottom: '16px',
-                    border: '2px solid #059669',
-                    backgroundColor: '#ECFDF5',
-                    boxShadow: '3px 3px 0px #065F46'
+                    border: '1px solid #A7F3D0',
+                    borderLeft: '3px solid #166534',
+                    backgroundColor: '#F7FBF8',
                   }}>
                     {/* Header Bar */}
                     <div style={{
-                      backgroundColor: '#059669',
-                      color: '#FFFFFF',
-                      padding: '8px 10px',
+                      backgroundColor: '#EDF7F0',
+                      color: '#166534',
+                      borderBottom: '1px solid #CBE7D4',
+                      padding: '8px 12px',
                       display: 'flex',
                       justifyContent: 'space-between',
                       alignItems: 'center'
                     }}>
-                      <span style={{ fontSize: '10px', fontWeight: 900, letterSpacing: '0.5px' }}>
-                        [MANUELLE FORSCHUNGS-KURATION]
+                      <span style={{ fontSize: '11px', fontWeight: 700 }}>
+                        {t('Manual Research Curation', 'Manuelle Forschungs-Kuration', 'Curation scientifique manuelle')}
                       </span>
-                      <span style={{
-                        backgroundColor: '#064E3B',
-                        color: '#A7F3D0',
+                      <span className="mono" style={{
+                        backgroundColor: '#FFFFFF',
+                        color: '#166534',
+                        border: '1px solid #A7F3D0',
                         padding: '1px 6px',
-                        fontSize: '8px',
-                        fontWeight: 'bold',
-                        letterSpacing: '0.5px'
+                        fontSize: '9px',
+                        fontWeight: 600,
                       }}>
-                        IMMUN GEGEN NLP-RE-INGEST
+                        {t('Persistent', 'Persistent', 'Persistant')}
                       </span>
                     </div>
 
@@ -3240,12 +3516,12 @@ export default function App() {
                       {/* Vorhandene Annotationen */}
                       {isLoadingAnnotations ? (
                         <div style={{ fontSize: '9px', color: '#047857', fontStyle: 'italic', marginBottom: '8px' }}>
-                          Lade manuelle Kurationen aus Neo4j...
+                          {t('Loading manual curations from graph...', 'Lade manuelle Kurationen aus Neo4j...', 'Chargement des annotations depuis le graphe...')}
                         </div>
                       ) : annotations.length > 0 ? (
                         <div style={{ marginBottom: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
                           <div style={{ fontSize: '9px', fontWeight: 'bold', color: '#065F46' }}>
-                            VERIFIZIERTE PEER-REVIEW-EINTRÄGE ({annotations.length}):
+                            {t('VERIFIED PEER-REVIEW ENTRIES', 'VERIFIZIERTE PEER-REVIEW-EINTRÄGE', 'ENTRÉES ÉVALUÉES PAR LES PAIRS')} ({annotations.length}):
                           </div>
                           {annotations.map((ann) => (
                             <div key={ann.id} style={{
@@ -3258,7 +3534,7 @@ export default function App() {
                               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
                                 <div>
                                   <span style={{ fontWeight: 900, color: '#065F46' }}>{ann.author}</span>
-                                  <span style={{ color: '#64748B', marginLeft: '6px', fontSize: '8px' }}>({ann.role || 'Forscher'})</span>
+                                  <span style={{ color: '#64748B', marginLeft: '6px', fontSize: '8px' }}>({ann.role || t('Researcher', 'Forscher', 'Chercheur')})</span>
                                 </div>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                                   <span style={{
@@ -3272,7 +3548,7 @@ export default function App() {
                                   </span>
                                   <button
                                     onClick={() => handleDeleteAnnotation(ann.id)}
-                                    title="Annotation löschen"
+                                    title={t('Delete annotation', 'Annotation löschen', "Supprimer l'annotation")}
                                     style={{
                                       background: 'none',
                                       border: 'none',
@@ -3294,7 +3570,7 @@ export default function App() {
 
                               {ann.tags && ann.tags.length > 0 && (
                                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '6px' }}>
-                                  {ann.tags.map((t: string, idx: number) => (
+                                  {ann.tags.map((tagItem: string, idx: number) => (
                                     <span key={idx} style={{
                                       backgroundColor: '#D1FAE5',
                                       color: '#065F46',
@@ -3303,21 +3579,25 @@ export default function App() {
                                       fontSize: '8px',
                                       fontWeight: 'bold'
                                     }}>
-                                      #{t}
+                                      #{tagItem}
                                     </span>
                                   ))}
                                 </div>
                               )}
 
                               <div style={{ fontSize: '7.5px', color: '#94A3B8', marginTop: '4px', textAlign: 'right' }}>
-                                {ann.created_at ? new Date(ann.created_at).toLocaleString('de-DE') : ''}
+                                {ann.created_at ? new Date(ann.created_at).toLocaleString(lang === 'de' ? 'de-DE' : lang === 'fr' ? 'fr-FR' : 'en-US') : ''}
                               </div>
                             </div>
                           ))}
                         </div>
                       ) : (
                         <div style={{ fontSize: '8.5px', color: '#047857', fontStyle: 'italic', marginBottom: '10px' }}>
-                          Bislang keine manuelle Kuration für dieses Objekt hinterlegt.
+                          {t(
+                            'No manual curation recorded for this object yet.',
+                            'Bislang keine manuelle Kuration für dieses Objekt hinterlegt.',
+                            'Aucune curation manuelle enregistrée pour cet objet.'
+                          )}
                         </div>
                       )}
 
@@ -3330,20 +3610,20 @@ export default function App() {
                         gap: '6px'
                       }}>
                         <div style={{ fontSize: '9px', fontWeight: 'bold', color: '#064E3B' }}>
-                          NEUE ANNOTATION HINZUFÜGEN:
+                          {t('ADD NEW ANNOTATION:', 'NEUE ANNOTATION HINZUFÜGEN:', 'AJOUTER UNE ANNOTATION :')}
                         </div>
 
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
                           <div>
-                            <label style={{ fontSize: '8px', color: '#065F46', fontWeight: 'bold' }}>AUTOR:</label>
+                            <label style={{ fontSize: '8px', color: '#065F46', fontWeight: 'bold' }}>{t('AUTHOR:', 'AUTOR:', 'AUTEUR :')}</label>
                             <select
                               value={annAuthor}
                               onChange={e => {
                                 setAnnAuthor(e.target.value);
                                 if (e.target.value === 'Marianne') setAnnRole('Provenance Lead');
-                                else if (e.target.value === 'Richard') setAnnRole('Projektleitung');
-                                else if (e.target.value === 'Stud. Hilfskraft') setAnnRole('Recherche-Team');
-                                else setAnnRole('Gastforscher');
+                                else if (e.target.value === 'Richard') setAnnRole(t('Project Lead', 'Projektleitung', 'Direction de projet'));
+                                else if (e.target.value === 'Stud. Hilfskraft') setAnnRole(t('Research Team', 'Recherche-Team', 'Équipe de recherche'));
+                                else setAnnRole(t('Guest Researcher', 'Gastforscher', 'Chercheur invité'));
                               }}
                               style={{
                                 width: '100%',
@@ -3355,13 +3635,13 @@ export default function App() {
                               }}
                             >
                               <option value="Marianne">Marianne (Provenance Lead)</option>
-                              <option value="Richard">Richard (Projektleitung)</option>
-                              <option value="Stud. Hilfskraft">Stud. Hilfskraft</option>
-                              <option value="Gastforscher">Gastforscher / Delegation</option>
+                              <option value="Richard">{t('Richard (Project Lead)', 'Richard (Projektleitung)', 'Richard (Direction de projet)')}</option>
+                              <option value="Stud. Hilfskraft">{t('Research Assistant', 'Stud. Hilfskraft', 'Assistant·e de recherche')}</option>
+                              <option value="Gastforscher">{t('Guest Researcher / Delegation', 'Gastforscher / Delegation', 'Chercheur invité / Délégation')}</option>
                             </select>
                           </div>
                           <div>
-                            <label style={{ fontSize: '8px', color: '#065F46', fontWeight: 'bold' }}>KONFIDENZ:</label>
+                            <label style={{ fontSize: '8px', color: '#065F46', fontWeight: 'bold' }}>{t('CONFIDENCE:', 'KONFIDENZ:', 'CONFIANCE :')}</label>
                             <select
                               value={annConfidence}
                               onChange={e => setAnnConfidence(e.target.value)}
@@ -3373,18 +3653,18 @@ export default function App() {
                                 backgroundColor: '#FFFFFF'
                               }}
                             >
-                              <option value="HIGH">VERIFIZIERT (HIGH)</option>
-                              <option value="MEDIUM">VORLÄUFIG (MEDIUM)</option>
-                              <option value="LOW">HYPOTHESE (LOW)</option>
+                              <option value="HIGH">{t('VERIFIED (HIGH)', 'VERIFIZIERT (HIGH)', 'VÉRIFIÉ (ÉLEVÉ)')}</option>
+                              <option value="MEDIUM">{t('PRELIMINARY (MEDIUM)', 'VORLÄUFIG (MEDIUM)', 'PRÉLIMINAIRE (MOYEN)')}</option>
+                              <option value="LOW">{t('HYPOTHESIS (LOW)', 'HYPOTHESE (LOW)', 'HYPOTHÈSE (FAIBLE)')}</option>
                             </select>
                           </div>
                         </div>
 
                         <div>
-                          <label style={{ fontSize: '8px', color: '#065F46', fontWeight: 'bold' }}>TAGS (KOMMAGETRENNT):</label>
+                          <label style={{ fontSize: '8px', color: '#065F46', fontWeight: 'bold' }}>{t('TAGS (COMMA-SEPARATED):', 'TAGS (KOMMAGETRENNT):', 'MOTS-CLÉS (SÉPARÉS PAR VIRGULES) :')}</label>
                           <input
                             type="text"
-                            placeholder="z.B. Glauning 1906, Bamum, Beutegut"
+                            placeholder={t('e.g. Glauning 1906, Bamum, Looted', 'z.B. Glauning 1906, Bamum, Beutegut', 'ex. Glauning 1906, Bamoun, Butin')}
                             value={annTags}
                             onChange={e => setAnnTags(e.target.value)}
                             style={{
@@ -3399,10 +3679,14 @@ export default function App() {
                         </div>
 
                         <div>
-                          <label style={{ fontSize: '8px', color: '#065F46', fontWeight: 'bold' }}>FORSCHUNGSNOTIZ / SUBSUMTION:</label>
+                          <label style={{ fontSize: '8px', color: '#065F46', fontWeight: 'bold' }}>{t('RESEARCH NOTE / LEGAL SUBSUMPTION:', 'FORSCHUNGSNOTIZ / SUBSUMTION:', 'NOTE DE RECHERCHE / QUALIFICATION JURIDIQUE :')}</label>
                           <textarea
                             rows={3}
-                            placeholder="Forensische Notiz, Archivbeleg, Zeugenbericht oder Kuration eintragen..."
+                            placeholder={t(
+                              'Enter forensic note, archive reference, witness statement, or curation...',
+                              'Forensische Notiz, Archivbeleg, Zeugenbericht oder Kuration eintragen...',
+                              "Saisir une note forensique, référence d'archive, témoignage ou curation..."
+                            )}
                             value={annNotes}
                             onChange={e => setAnnNotes(e.target.value)}
                             style={{
@@ -3421,18 +3705,20 @@ export default function App() {
                           onClick={handleSaveAnnotation}
                           disabled={isSubmittingAnn || !annNotes.trim()}
                           style={{
-                            backgroundColor: !annNotes.trim() ? '#94A3B8' : '#059669',
+                            backgroundColor: !annNotes.trim() ? '#A3A097' : '#166534',
                             color: '#FFFFFF',
-                            border: '1px solid #000000',
-                            padding: '6px 10px',
-                            fontWeight: 'bold',
-                            fontSize: '9px',
+                            border: 'none',
+                            borderRadius: '2px',
+                            padding: '7px 12px',
+                            fontWeight: 600,
+                            fontSize: '11px',
                             cursor: (!annNotes.trim() || isSubmittingAnn) ? 'not-allowed' : 'pointer',
-                            boxShadow: '2px 2px 0px #000000',
-                            marginTop: '2px'
+                            marginTop: '4px'
                           }}
                         >
-                          {isSubmittingAnn ? '[SPEICHERE IM GRAPHEN...]' : '[ANNOTATION PERSISTENT IM GRAPHEN SPEICHERN]'}
+                          {isSubmittingAnn
+                            ? t('Saving annotation…', 'Speichere Annotation…', 'Enregistrement…')
+                            : t('Save annotation to graph', 'Annotation im Graphen speichern', "Enregistrer l'annotation dans le graphe")}
                         </button>
 
                         {annStatusMsg && (
@@ -3448,44 +3734,44 @@ export default function App() {
                 
                 {/* MANUELLE RELATION */}
                 {(selectedNodeDetails && (selectedNodeDetails.type === 'Subjekt' || selectedNodeDetails.type === 'Objekt' || selectedNodeDetails.type === 'Institution' || selectedNodeDetails.type === 'Akteur')) && (
-                  <div style={{ marginTop: '15px', border: '2px dashed #DC2626', padding: '10px', backgroundColor: '#FEF2F2' }}>
-                    <div style={{ fontSize: '10px', fontWeight: 'bold', color: '#B91C1C', marginBottom: '8px' }}>
-                      [+ MANUELLE RELATION VERKNÜPFEN]
+                  <div style={{ marginTop: '14px', border: '1px solid #D8D5CD', borderLeft: '3px solid #991B1B', padding: '12px', backgroundColor: '#F7F6F2' }}>
+                    <div style={{ fontSize: '11px', fontWeight: 700, color: '#991B1B', marginBottom: '8px' }}>
+                      {t('+ Link Manual Relation', '+ Manuelle Relation verknüpfen', '+ Lier une relation manuelle')}
                     </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '7px' }}>
                       <input 
                         type="text" 
-                        placeholder="Ziel-Knoten ID (z.B. Hans Glauning)" 
+                        placeholder={t('Target Node ID (e.g. Hans Glauning)', 'Ziel-Knoten ID (z. B. Hans Glauning)', 'ID du nœud cible (ex. Hans Glauning)')} 
                         value={newEdgeTarget} 
                         onChange={e => setNewEdgeTarget(e.target.value)} 
-                        style={{ padding: '6px', fontSize: '9px', border: '1px solid #000' }} 
+                        style={{ padding: '6px 8px', fontSize: '11px', border: '1px solid #D8D5CD', backgroundColor: '#FFFFFF' }} 
                       />
                       <select 
                         value={newEdgeType} 
                         onChange={e => setNewEdgeType(e.target.value)} 
-                        style={{ padding: '6px', fontSize: '9px', border: '1px solid #000', fontWeight: 'bold' }}
+                        style={{ padding: '6px 8px', fontSize: '11px', border: '1px solid #D8D5CD', fontWeight: 600, backgroundColor: '#FFFFFF' }}
                       >
-                        <option value="RAUBTE">RAUBTE</option>
-                        <option value="SCHENKTE">SCHENKTE</option>
-                        <option value="LAGERT_IN">LAGERT_IN</option>
-                        <option value="VERKAUFTE_AN">VERKAUFTE_AN</option>
-                        <option value="UEBERGAB_AN">UEBERGAB_AN</option>
-                        <option value="ENTEIGNETE">ENTEIGNETE</option>
-                        <option value="VERDACHT_AUF">VERDACHT_AUF</option>
-                        <option value="WAR_BETEILIGT_AN">WAR_BETEILIGT_AN</option>
+                        <option value="RAUBTE">{relLabel('RAUBTE', lang)}</option>
+                        <option value="SCHENKTE">{relLabel('SCHENKTE', lang)}</option>
+                        <option value="LAGERT_IN">{relLabel('LAGERT_IN', lang)}</option>
+                        <option value="VERKAUFTE_AN">{relLabel('VERKAUFTE_AN', lang)}</option>
+                        <option value="UEBERGAB_AN">{relLabel('UEBERGAB_AN', lang)}</option>
+                        <option value="ENTEIGNETE">{relLabel('ENTEIGNETE', lang)}</option>
+                        <option value="VERDACHT_AUF">{relLabel('VERDACHT_AUF', lang)}</option>
+                        <option value="WAR_BETEILIGT_AN">{relLabel('WAR_BETEILIGT_AN', lang)}</option>
                       </select>
                       <input 
                         type="text" 
-                        placeholder="Beleg / Aktenzeichen / Quelle" 
+                        placeholder={t('Citation / File Ref. / Source', 'Beleg / Aktenzeichen / Quelle', "Référence / Cote d'archive / Source")} 
                         value={newEdgeBeleg} 
                         onChange={e => setNewEdgeBeleg(e.target.value)} 
-                        style={{ padding: '6px', fontSize: '9px', border: '1px solid #000' }} 
+                        style={{ padding: '6px 8px', fontSize: '11px', border: '1px solid #D8D5CD', backgroundColor: '#FFFFFF' }} 
                       />
                       <button 
                         onClick={handleCreateEdge} 
-                        style={{ padding: '8px', fontSize: '9px', fontWeight: 'bold', backgroundColor: '#DC2626', color: '#FFF', border: '2px solid #000', cursor: 'pointer', boxShadow: '2px 2px 0px #000' }}
+                        style={{ padding: '8px 12px', fontSize: '11px', fontWeight: 600, backgroundColor: '#991B1B', color: '#FFFFFF', border: 'none', borderRadius: '2px', cursor: 'pointer' }}
                       >
-                        [KANTE PERSISTENT SPEICHERN]
+                        {t('Save relation to graph', 'Kante im Graphen speichern', "Enregistrer l'arête")}
                       </button>
                     </div>
                   </div>
@@ -3493,39 +3779,44 @@ export default function App() {
 
                 {/* Subjekt Actions: POI Watchlist + Single Dossier */}
                 {(selectedNodeDetails && (selectedNodeDetails.type === 'Subjekt' || selectedNodeDetails.type === 'Objekt')) && (
-                  <div style={{ borderTop: '2px solid #000000', paddingTop: '14px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <div style={{ borderTop: '1px solid #D8D5CD', paddingTop: '14px', marginTop: '14px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
                     <button
                       onClick={() => togglePinPoi({ id: selectedNodeDetails.id, label: selectedNodeDetails.label, desc: selectedNodeDetails.desc })}
                       style={{
                         width: '100%',
-                        padding: '8px 10px',
-                        backgroundColor: pinnedPois.some(p => p.id === selectedNodeDetails.id) ? '#0F766E' : '#FFFFFF',
-                        color: pinnedPois.some(p => p.id === selectedNodeDetails.id) ? '#FFFFFF' : '#0F766E',
-                        border: '2px solid #0F766E',
-                        fontWeight: 900,
-                        fontSize: '9.5px',
+                        padding: '8px 12px',
+                        backgroundColor: pinnedPois.some(p => p.id === selectedNodeDetails.id) ? '#155E75' : '#FFFFFF',
+                        color: pinnedPois.some(p => p.id === selectedNodeDetails.id) ? '#FFFFFF' : '#155E75',
+                        border: '1px solid #155E75',
+                        borderRadius: '2px',
+                        fontWeight: 600,
+                        fontSize: '11px',
                         cursor: 'pointer'
                       }}
                     >
-                      {pinnedPois.some(p => p.id === selectedNodeDetails.id) ? '[AUS FALLAKTE (POI) ENTFERNEN]' : '[+ ALS LEITOBJEKT IN FALLAKTE MERKEN]'}
+                      {pinnedPois.some(p => p.id === selectedNodeDetails.id)
+                        ? t('Remove from Case Watchlist (POI)', 'Aus Fallakte (POI) entfernen', 'Retirer des objets phares (POI)')
+                        : t('+ Pin as Key Object (Watchlist)', '+ Als Leitobjekt in Fallakte merken', '+ Épingler comme objet phare')}
                     </button>
                     <button
                       onClick={() => handlePrintDossier(selectedNodeDetails.id)}
                       disabled={isGeneratingDossier}
                       style={{
                         width: '100%',
-                        padding: '12px 14px',
-                        backgroundColor: '#000000',
+                        padding: '10px 14px',
+                        backgroundColor: '#141413',
                         color: '#FFFFFF',
                         border: 'none',
-                        boxShadow: selectedNodeDetails.isContested ? '3px 3px 0px #CA8A04' : '3px 3px 0px #DC2626',
-                        fontWeight: 'bold',
-                        fontSize: '10px',
+                        borderLeft: `3px solid ${selectedNodeDetails.isContested ? '#CA8A04' : '#991B1B'}`,
+                        borderRadius: '2px',
+                        fontWeight: 600,
+                        fontSize: '11.5px',
                         cursor: isGeneratingDossier ? 'wait' : 'pointer',
-                        letterSpacing: '0.5px'
                       }}
                     >
-                      {isGeneratingDossier ? '[GENERIERE AMTLICHES PDF...]' : '[AMTLICHES RESTITUTIONSDOSSIER DRUCKEN (PDF)]'}
+                      {isGeneratingDossier
+                        ? t('Generating restitution dossier…', 'Generiere Restitutionsdossier…', 'Génération du dossier…')
+                        : t('Export Restitution Dossier (PDF / HTML)', 'Restitutionsdossier exportieren (PDF / HTML)', 'Exporter le dossier de restitution')}
                     </button>
                     
                     {dossierStatus && (
@@ -3535,7 +3826,11 @@ export default function App() {
                     )}
 
                     <p style={{ fontSize: '8px', color: '#64748B', marginTop: '6px', lineHeight: 1.3, textAlign: 'center' }}>
-                      Generiert ein 2-seitiges Gutachten inkl. SHA-256-Hash, Primärbeleg und HLKO/Washingtoner Prinzipien-Prüfung.
+                      {t(
+                        'Generates a 2-page forensic dossier incl. SHA-256 hash, primary citations, and Hague Convention / Washington Principles assessment.',
+                        'Generiert ein 2-seitiges Gutachten inkl. SHA-256-Hash, Primärbeleg und HLKO/Washingtoner Prinzipien-Prüfung.',
+                        'Génère une expertise de 2 pages avec empreinte SHA-256, sources primaires et analyse Convention de La Haye / Principes de Washington.'
+                      )}
                     </p>
                   </div>
                 )}
@@ -3544,17 +3839,17 @@ export default function App() {
                 {selectedNodeDetails.type === 'Akteur' && (
                   <div style={{ borderTop: '2px solid #000000', paddingTop: '14px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
                     <div style={{ fontSize: '10px', fontWeight: 900, color: '#B45309', marginBottom: '2px' }}>
-                      [FORENSISCHES TÄTER- & BEUTEREGISTER]
+                      {t('[FORENSIC ACTOR & LOOT REGISTER]', '[FORENSISCHES TÄTER- & BEUTEREGISTER]', '[REGISTRE FORENSIQUE DES ACTEURS & BUTINS]')}
                     </div>
                     {focusedSummary && (focusedSummary.name === selectedNodeDetails.label || focusedSummary.name === selectedNodeDetails.id) && (
                       <div style={{ backgroundColor: '#FFFBEB', border: '1px solid #B45309', padding: '8px', fontSize: '9px', lineHeight: 1.4, marginBottom: '4px' }}>
-                        <div><b>Dokumentierte Raubzüge:</b> <span style={{ color: '#DC2626', fontWeight: 'bold' }}>{focusedSummary.raub_count} Subjekte</span></div>
-                        <div><b>Offizielle "Schenkungen":</b> <span style={{ color: '#2563EB', fontWeight: 'bold' }}>{focusedSummary.schenk_count} Fälle</span></div>
+                        <div><b>{t('Documented Looting Raids:', 'Dokumentierte Raubzüge:', 'Raids de pillage documentés :')}</b> <span style={{ color: '#DC2626', fontWeight: 'bold' }}>{focusedSummary.raub_count} {t('objects', 'Subjekte', 'objets')}</span></div>
+                        <div><b>{t('Official "Donations":', 'Offizielle "Schenkungen":', '« Dons » officiels :')}</b> <span style={{ color: '#2563EB', fontWeight: 'bold' }}>{focusedSummary.schenk_count} {t('cases', 'Fälle', 'cas')}</span></div>
                         {focusedSummary.depots && focusedSummary.depots.length > 0 && (
-                          <div style={{ marginTop: '2px' }}><b>Ziel-Depots:</b> {focusedSummary.depots.join(', ')}</div>
+                          <div style={{ marginTop: '2px' }}><b>{t('Target Depots:', 'Ziel-Depots:', 'Dépôts cibles :')}</b> {focusedSummary.depots.join(', ')}</div>
                         )}
                         {focusedSummary.expeditionen && focusedSummary.expeditionen.length > 0 && (
-                          <div style={{ marginTop: '2px' }}><b>Expeditionen:</b> {focusedSummary.expeditionen.join(', ')}</div>
+                          <div style={{ marginTop: '2px' }}><b>{t('Expeditions:', 'Expeditionen:', 'Expéditions :')}</b> {focusedSummary.expeditionen.join(', ')}</div>
                         )}
                       </div>
                     )}
@@ -3565,18 +3860,23 @@ export default function App() {
                       disabled={isGeneratingBatch}
                       style={{
                         width: '100%',
-                        padding: '10px 12px',
-                        backgroundColor: '#B45309',
+                        padding: '9px 12px',
+                        backgroundColor: '#9A3412',
                         color: '#FFFFFF',
-                        border: '2px solid #000000',
-                        fontWeight: 'bold',
-                        fontSize: '9px',
+                        border: 'none',
+                        borderRadius: '2px',
+                        fontWeight: 600,
+                        fontSize: '11px',
                         cursor: isGeneratingBatch ? 'wait' : 'pointer',
-                        boxShadow: '3px 3px 0px #000000',
-                        letterSpacing: '0.5px'
                       }}
                     >
-                      {isGeneratingBatch ? '[BÜNDLE DOSSIER-ARCHIV...]' : `[ALLE ${focusedSummary?.raub_count || selectedNodeDetails.links?.filter((l: any) => l.type === 'RAUBTE').length || ''} RAUB-DOSSIERS EXPORTIEREN (ZIP)]`}
+                      {isGeneratingBatch
+                        ? t('Packaging dossier archive…', 'Bündle Dossier-Archiv…', "Compilation de l'archive…")
+                        : t(
+                            `Export all ${focusedSummary?.raub_count || selectedNodeDetails.links?.filter((l: any) => l.type === 'RAUBTE').length || ''} actor dossiers`,
+                            `Alle ${focusedSummary?.raub_count || selectedNodeDetails.links?.filter((l: any) => l.type === 'RAUBTE').length || ''} Akteur-Dossiers exportieren`,
+                            `Exporter les ${focusedSummary?.raub_count || selectedNodeDetails.links?.filter((l: any) => l.type === 'RAUBTE').length || ''} dossiers`
+                          )}
                     </button>
 
                     {batchStatus && (
@@ -3598,7 +3898,9 @@ export default function App() {
                         cursor: 'pointer'
                       }}
                     >
-                      {focusedEntity?.name === selectedNodeDetails.label ? '[TÄTER-ISOLATION AKTIV (FOKUS AUFHEBEN)]' : `[NUR ${selectedNodeDetails.label.toUpperCase()} ISOLIEREN]`}
+                      {focusedEntity?.name === selectedNodeDetails.label
+                        ? t('[ACTOR ISOLATION ACTIVE (CLEAR FOCUS)]', '[TÄTER-ISOLATION AKTIV (FOKUS AUFHEBEN)]', '[ISOLATION ACTEUR ACTIVE (LEVER LE FOCUS)]')
+                        : t(`[ISOLATE ${selectedNodeDetails.label.toUpperCase()} ONLY]`, `[NUR ${selectedNodeDetails.label.toUpperCase()} ISOLIEREN]`, `[ISOLER UNIQUEMENT ${selectedNodeDetails.label.toUpperCase()}]`)}
                     </button>
                     <button
                       onClick={() => handleExclusiveCypherToggle(selectedNodeDetails.label)}
@@ -3613,7 +3915,9 @@ export default function App() {
                         cursor: 'pointer'
                       }}
                     >
-                      {exclusiveCypherMode && focusedEntity?.name === selectedNodeDetails.label ? '[EXKLUSIV-CYPHER BEENDEN (VOLLANSICHT)]' : `[EXKLUSIV CYPHER LADEN: NUR ${selectedNodeDetails.label.toUpperCase()}]`}
+                      {exclusiveCypherMode && focusedEntity?.name === selectedNodeDetails.label
+                        ? t('[EXIT EXCLUSIVE CYPHER (FULL VIEW)]', '[EXKLUSIV-CYPHER BEENDEN (VOLLANSICHT)]', '[QUITTER CYPHER EXCLUSIF (VUE COMPLÈTE)]')
+                        : t(`[LOAD EXCLUSIVE CYPHER: ${selectedNodeDetails.label.toUpperCase()} ONLY]`, `[EXKLUSIV CYPHER LADEN: NUR ${selectedNodeDetails.label.toUpperCase()}]`, `[CHARGER CYPHER EXCLUSIF : ${selectedNodeDetails.label.toUpperCase()}]`)}
                     </button>
                   </div>
                 )}
@@ -3622,15 +3926,15 @@ export default function App() {
                 {selectedNodeDetails.type === 'Institution' && (
                   <div style={{ borderTop: '2px solid #000000', paddingTop: '14px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
                     <div style={{ fontSize: '10px', fontWeight: 900, color: '#000000', marginBottom: '2px' }}>
-                      [MUSEUMS-DEPOT BESTANDSAKTE]
+                      {t('[MUSEUM DEPOT HOLDINGS FILE]', '[MUSEUMS-DEPOT BESTANDSAKTE]', "[DOSSIER D'INVENTAIRE DU DÉPÔT MUSÉAL]")}
                     </div>
                     {focusedSummary && (focusedSummary.name === selectedNodeDetails.label || focusedSummary.name === selectedNodeDetails.id) && (
                       <div style={{ backgroundColor: '#F8FAFC', border: '1px solid #000000', padding: '8px', fontSize: '9px', lineHeight: 1.4, marginBottom: '4px' }}>
-                        <div><b>Standort:</b> {selectedNodeDetails.desc || 'Deutschland'}</div>
-                        <div><b>Erfasste Subjekte:</b> <span style={{ fontWeight: 'bold' }}>{focusedSummary.total_subjekte}</span></div>
-                        <div><b>Dissonanzen (Whitewashed):</b> <span style={{ color: '#CA8A04', fontWeight: 'bold' }}>{focusedSummary.contested_subjekte} ({Math.round((focusedSummary.contested_subjekte / (focusedSummary.total_subjekte || 1)) * 100)}%)</span></div>
+                        <div><b>{t('Location:', 'Standort:', 'Localisation :')}</b> {selectedNodeDetails.desc || t('Germany', 'Deutschland', 'Allemagne')}</div>
+                        <div><b>{t('Recorded Objects:', 'Erfasste Subjekte:', 'Objets recensés :')}</b> <span style={{ fontWeight: 'bold' }}>{focusedSummary.total_subjekte}</span></div>
+                        <div><b>{t('Dissonances (Whitewashed):', 'Dissonanzen (Whitewashed):', 'Dissonances (Blanchies) :')}</b> <span style={{ color: '#CA8A04', fontWeight: 'bold' }}>{focusedSummary.contested_subjekte} ({Math.round((focusedSummary.contested_subjekte / (focusedSummary.total_subjekte || 1)) * 100)}%)</span></div>
                         {focusedSummary.top_akteure && focusedSummary.top_akteure.length > 0 && (
-                          <div style={{ marginTop: '2px' }}><b>Hauptzulieferer:</b> {focusedSummary.top_akteure.join(', ')}</div>
+                          <div style={{ marginTop: '2px' }}><b>{t('Primary Suppliers:', 'Hauptzulieferer:', 'Fournisseurs principaux :')}</b> {focusedSummary.top_akteure.join(', ')}</div>
                         )}
                       </div>
                     )}
@@ -3641,22 +3945,23 @@ export default function App() {
                       disabled={isGeneratingPetition}
                       style={{
                         width: '100%',
-                        padding: '11px 12px',
-                        backgroundColor: '#DC2626',
+                        padding: '10px 12px',
+                        backgroundColor: '#991B1B',
                         color: '#FFFFFF',
-                        border: '2px solid #000000',
-                        fontWeight: 900,
-                        fontSize: '9px',
+                        border: 'none',
+                        borderRadius: '2px',
+                        fontWeight: 600,
+                        fontSize: '11px',
                         cursor: isGeneratingPetition ? 'wait' : 'pointer',
-                        boxShadow: '3px 3px 0px #000000',
-                        letterSpacing: '0.5px'
                       }}
                     >
-                      {isGeneratingPetition ? '[HLKO-PAKET WIRD ASYNCHRON GENERIERT...]' : '[DIPLOMATISCHES RESTITUTIONSPAKET (HLKO) GENERIEREN]'}
+                      {isGeneratingPetition
+                        ? t('Generating Hague Convention package…', 'HLKO-Paket wird generiert…', 'Génération du dossier La Haye…')
+                        : t('Generate Diplomatic Restitution Package (HLKO)', 'Diplomatisches Restitutionspaket (HLKO) generieren', 'Générer le dossier diplomatique (La Haye)')}
                     </button>
 
                     {petitionStatus && (
-                      <div style={{ fontSize: '9px', color: '#DC2626', fontWeight: 'bold', backgroundColor: '#FEF2F2', padding: '6px', border: '1px solid #DC2626', textAlign: 'center' }}>
+                      <div style={{ fontSize: '10.5px', color: '#991B1B', fontWeight: 600, backgroundColor: '#FEF2F2', padding: '7px 9px', border: '1px solid #F3D1D1', textAlign: 'center' }}>
                         {petitionStatus}
                       </div>
                     )}
@@ -3668,40 +3973,41 @@ export default function App() {
                         style={{
                           display: 'block',
                           width: '100%',
-                          padding: '8px 12px',
-                          backgroundColor: '#16A34A',
+                          padding: '9px 12px',
+                          backgroundColor: '#166534',
                           color: '#FFFFFF',
-                          border: '2px solid #000000',
-                          fontWeight: 'bold',
-                          fontSize: '9px',
+                          border: 'none',
+                          borderRadius: '2px',
+                          fontWeight: 600,
+                          fontSize: '11px',
                           textAlign: 'center',
-                          boxShadow: '3px 3px 0px #000000',
                           textDecoration: 'none',
                           boxSizing: 'border-box'
                         }}
                       >
-                        [RESTITUTIONSPAKET HERUNTERLADEN (ZIP)]
+                        {t('Download Restitution Package (ZIP)', 'Restitutionspaket herunterladen (ZIP)', 'Télécharger le dossier de restitution (ZIP)')}
                       </a>
                     )}
 
-                    {/* Batch Dossier ZIP Export Button for Depot */}
+                    {/* Batch Dossier Export Button for Depot */}
                     <button
                       onClick={() => handleBatchDossier('institution', selectedNodeDetails.label)}
                       disabled={isGeneratingBatch}
                       style={{
                         width: '100%',
-                        padding: '10px 12px',
-                        backgroundColor: '#000000',
+                        padding: '9px 12px',
+                        backgroundColor: '#141413',
                         color: '#FFFFFF',
-                        border: '2px solid #000000',
-                        fontWeight: 'bold',
-                        fontSize: '9px',
+                        border: 'none',
+                        borderRadius: '2px',
+                        fontWeight: 600,
+                        fontSize: '11px',
                         cursor: isGeneratingBatch ? 'wait' : 'pointer',
-                        boxShadow: '3px 3px 0px #2563EB',
-                        letterSpacing: '0.5px'
                       }}
                     >
-                      {isGeneratingBatch ? '[BÜNDLE DEPOT-ARCHIV...]' : `[ALLE DOSSIERS DIESES DEPOTS EXPORTIEREN (ZIP)]`}
+                      {isGeneratingBatch
+                        ? t('Packaging depot archive…', 'Bündle Depot-Archiv…', "Compilation de l'archive du dépôt…")
+                        : t('Export All Dossiers for This Depot', 'Alle Dossiers dieses Depots exportieren', 'Exporter tous les dossiers de ce dépôt')}
                     </button>
 
                     {batchStatus && (
@@ -3723,7 +4029,9 @@ export default function App() {
                         cursor: 'pointer'
                       }}
                     >
-                      {focusedEntity?.name === selectedNodeDetails.label ? '[DEPOT-ISOLATION AKTIV (FOKUS AUFHEBEN)]' : `[NUR ${selectedNodeDetails.label.toUpperCase()} ISOLIEREN]`}
+                      {focusedEntity?.name === selectedNodeDetails.label
+                        ? t('[DEPOT ISOLATION ACTIVE (CLEAR FOCUS)]', '[DEPOT-ISOLATION AKTIV (FOKUS AUFHEBEN)]', '[ISOLATION DÉPÔT ACTIVE (LEVER LE FOCUS)]')
+                        : t(`[ISOLATE ${selectedNodeDetails.label.toUpperCase()} ONLY]`, `[NUR ${selectedNodeDetails.label.toUpperCase()} ISOLIEREN]`, `[ISOLER UNIQUEMENT ${selectedNodeDetails.label.toUpperCase()}]`)}
                     </button>
                     <button
                       onClick={() => handleExclusiveCypherToggle(selectedNodeDetails.label)}
@@ -3738,7 +4046,9 @@ export default function App() {
                         cursor: 'pointer'
                       }}
                     >
-                      {exclusiveCypherMode && focusedEntity?.name === selectedNodeDetails.label ? '[EXKLUSIV-CYPHER BEENDEN (VOLLANSICHT)]' : `[EXKLUSIV CYPHER LADEN: NUR ${selectedNodeDetails.label.toUpperCase()}]`}
+                      {exclusiveCypherMode && focusedEntity?.name === selectedNodeDetails.label
+                        ? t('[EXIT EXCLUSIVE CYPHER (FULL VIEW)]', '[EXKLUSIV-CYPHER BEENDEN (VOLLANSICHT)]', '[QUITTER CYPHER EXCLUSIF (VUE COMPLÈTE)]')
+                        : t(`[LOAD EXCLUSIVE CYPHER: ${selectedNodeDetails.label.toUpperCase()} ONLY]`, `[EXKLUSIV CYPHER LADEN: NUR ${selectedNodeDetails.label.toUpperCase()}]`, `[CHARGER CYPHER EXCLUSIF : ${selectedNodeDetails.label.toUpperCase()}]`)}
                     </button>
                   </div>
                 )}
@@ -3765,7 +4075,9 @@ export default function App() {
                         marginBottom: '4px'
                       }}
                     >
-                      {selectedLink.type === 'VERDACHT_AUF' ? '[FORENSISCHER VERDACHT: EXPEDITIONS-MATCH]' : `[EREIGNIS-AKTE: ${selectedLink.type}]`}
+                      {selectedLink.type === 'VERDACHT_AUF'
+                        ? t('[FORENSIC SUSPICION: EXPEDITION MATCH]', '[FORENSISCHER VERDACHT: EXPEDITIONS-MATCH]', "[SOUPÇON FORENSIQUE : CORRESPONDANCE D'EXPÉDITION]")
+                        : `[${t('EVENT RECORD', 'EREIGNIS-AKTE', "FICHE D'ÉVÉNEMENT")}: ${relLabel(selectedLink.type, lang)}]`}
                     </span>
                     <h2 style={{ margin: '4px 0 0 0', fontSize: '14px', fontWeight: 900, wordBreak: 'break-word', color: '#000000' }}>
                       {selectedLink.source_label || (selectedLink.source.label || selectedLink.source.id || selectedLink.source)} &rarr; {selectedLink.target_label || (selectedLink.target.label || selectedLink.target.id || selectedLink.target)}
@@ -3792,15 +4104,15 @@ export default function App() {
                     <div style={{ border: '2px solid #0891B2', padding: '10px', backgroundColor: '#F0FDFA' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <span style={{ fontSize: '9px', fontWeight: 900, color: '#0E7490' }}>
-                          [PROBABILISTISCHE PROVENIENZ-ZUWEISUNG]
+                          {t('[PROBABILISTIC PROVENANCE ASSIGNMENT]', '[PROBABILISTISCHE PROVENIENZ-ZUWEISUNG]', '[ATTRIBUTION PROBABILISTE DE PROVENANCE]')}
                         </span>
                         <span style={{ backgroundColor: '#0891B2', color: '#FFFFFF', padding: '1px 6px', fontSize: '8px', fontWeight: 'bold' }}>
-                          {Math.round((selectedLink.confidence || 0.9) * 100)}% KONFIDENZ
+                          {Math.round((selectedLink.confidence || 0.9) * 100)}% {t('CONFIDENCE', 'KONFIDENZ', 'CONFIANCE')}
                         </span>
                       </div>
                       {selectedLink.begruendung && (
                         <div style={{ fontSize: '9px', color: '#0F172A', marginTop: '6px', lineHeight: 1.3 }}>
-                          <b>Heuristische Begründung:</b> {selectedLink.begruendung}
+                          <b>{t('Heuristic Rationale:', 'Heuristische Begründung:', 'Justification heuristique :')}</b> {selectedLink.begruendung}
                         </div>
                       )}
                       {selectedLink.zitat && (
@@ -3811,7 +4123,9 @@ export default function App() {
                     </div>
                   )}
                   <div style={{ border: '1px solid #000000', padding: '8px', backgroundColor: '#F8FAFC' }}>
-                    <div style={{ fontSize: '8px', color: '#64748B', fontWeight: 'bold' }}>URHEBER / VERANTWORTLICHER AKTEUR:</div>
+                    <div style={{ fontSize: '8px', color: '#64748B', fontWeight: 'bold' }}>
+                      {t('ORIGINATOR / RESPONSIBLE ACTOR:', 'URHEBER / VERANTWORTLICHER AKTEUR:', 'AUTEUR / ACTEUR RESPONSABLE :')}
+                    </div>
                     <div style={{ fontSize: '11px', fontWeight: 'bold', color: '#000000', marginTop: '2px' }}>
                       {selectedLink.source_label || (selectedLink.source.label || selectedLink.source.id)}
                     </div>
@@ -3823,7 +4137,9 @@ export default function App() {
                   </div>
 
                   <div style={{ border: '1px solid #000000', padding: '8px', backgroundColor: '#F8FAFC' }}>
-                    <div style={{ fontSize: '8px', color: '#64748B', fontWeight: 'bold' }}>BETROFFENES SUBJEKT / KULTURGUT:</div>
+                    <div style={{ fontSize: '8px', color: '#64748B', fontWeight: 'bold' }}>
+                      {t('AFFECTED OBJECT / CULTURAL HERITAGE:', 'BETROFFENES SUBJEKT / KULTURGUT:', 'OBJET / BIEN CULTUREL CONCERNÉ :')}
+                    </div>
                     <div style={{ fontSize: '11px', fontWeight: 'bold', color: '#000000', marginTop: '2px' }}>
                       {selectedLink.target_label || (selectedLink.target.label || selectedLink.target.id)}
                     </div>
@@ -3835,25 +4151,29 @@ export default function App() {
                   </div>
 
                   <div style={{ border: '1px solid #000000', padding: '8px', backgroundColor: '#EFF6FF', borderLeft: '4px solid #2563EB' }}>
-                    <div style={{ fontSize: '8px', color: '#1E40AF', fontWeight: 'bold' }}>HISTORISCHER PRIMÄRBELEG / QUELLE:</div>
+                    <div style={{ fontSize: '8px', color: '#1E40AF', fontWeight: 'bold' }}>
+                      {t('HISTORICAL PRIMARY CITATION / SOURCE:', 'HISTORISCHER PRIMÄRBELEG / QUELLE:', 'SOURCE PRIMAIRE HISTORIQUE :')}
+                    </div>
                     <div style={{ fontSize: '10px', fontWeight: 'bold', color: '#000000', marginTop: '2px' }}>
-                      {selectedLink.beleg || "Keine Quellenangabe verzeichnet"}
+                      {selectedLink.beleg || t('No citation recorded', 'Keine Quellenangabe verzeichnet', 'Aucune source enregistrée')}
                     </div>
                     {selectedLink.jahr && (
                       <div style={{ fontSize: '9px', color: '#475569', marginTop: '3px' }}>
-                        <b>Ereignisjahr:</b> {selectedLink.jahr}
+                        <b>{t('Event Year:', 'Ereignisjahr:', "Année de l'événement :")}</b> {selectedLink.jahr}
                       </div>
                     )}
                     {selectedLink.expedition && (
                       <div style={{ fontSize: '9px', color: '#475569', marginTop: '2px' }}>
-                        <b>Expedition / Register:</b> {selectedLink.expedition}
+                        <b>{t('Expedition / Register:', 'Expedition / Register:', 'Expédition / Registre :')}</b> {selectedLink.expedition}
                       </div>
                     )}
                   </div>
 
                   {selectedLink.behauptung && (
                     <div style={{ border: '1px solid #000000', padding: '8px', backgroundColor: '#FEFCE8', borderLeft: '4px solid #CA8A04' }}>
-                      <div style={{ fontSize: '8px', color: '#854D0E', fontWeight: 'bold' }}>NARRATIV-EINSTUFUNG:</div>
+                      <div style={{ fontSize: '8px', color: '#854D0E', fontWeight: 'bold' }}>
+                        {t('NARRATIVE CLASSIFICATION:', 'NARRATIV-EINSTUFUNG:', 'QUALIFICATION NARRATIVE :')}
+                      </div>
                       <div style={{ fontSize: '9px', color: '#000000', marginTop: '2px', fontStyle: 'italic' }}>
                         &ldquo;{selectedLink.behauptung}&rdquo;
                       </div>
@@ -3863,48 +4183,54 @@ export default function App() {
 
                 {/* Action Button: Dossier fuer verknuepftes Subjekt */}
                 {(selectedLink.target_inv || selectedLink.source_inv) && (
-                  <div style={{ borderTop: '2px solid #000000', paddingTop: '14px' }}>
+                  <div style={{ borderTop: '1px solid #D8D5CD', paddingTop: '14px' }}>
                     <button
                       onClick={() => handlePrintDossier(selectedLink.target_inv || selectedLink.source_inv)}
                       disabled={isGeneratingDossier}
                       style={{
                         width: '100%',
-                        padding: '12px 14px',
-                        backgroundColor: '#000000',
+                        padding: '10px 14px',
+                        backgroundColor: '#141413',
                         color: '#FFFFFF',
                         border: 'none',
-                        boxShadow: '3px 3px 0px #DC2626',
-                        fontWeight: 'bold',
-                        fontSize: '10px',
+                        borderLeft: '3px solid #991B1B',
+                        borderRadius: '2px',
+                        fontWeight: 600,
+                        fontSize: '11px',
                         cursor: isGeneratingDossier ? 'wait' : 'pointer',
-                        letterSpacing: '0.5px'
                       }}
                     >
-                      {isGeneratingDossier ? '[GENERIERE AMTLICHES PDF...]' : `[AMTLICHES DOSSIER FUER ${selectedLink.target_inv || selectedLink.source_inv} DRUCKEN]`}
+                      {isGeneratingDossier
+                        ? t('Generating dossier…', 'Generiere Dossier…', 'Génération du dossier…')
+                        : t(
+                            `Export Dossier for ${selectedLink.target_inv || selectedLink.source_inv}`,
+                            `Dossier für ${selectedLink.target_inv || selectedLink.source_inv} exportieren`,
+                            `Exporter le dossier pour ${selectedLink.target_inv || selectedLink.source_inv}`
+                          )}
                     </button>
                     
                     {dossierStatus && (
-                      <div style={{ fontSize: '9px', color: '#DC2626', fontWeight: 'bold', marginTop: '6px', textAlign: 'center' }}>
+                      <div style={{ fontSize: '10.5px', color: '#991B1B', fontWeight: 600, marginTop: '6px', textAlign: 'center' }}>
                         {dossierStatus}
                       </div>
                     )}
 
-                    <div style={{ marginTop: '10px' }}>
+                    <div style={{ marginTop: '8px' }}>
                       <button
                         onClick={handleDeleteEdge}
                         style={{
                           width: '100%',
-                          padding: '10px 12px',
-                          backgroundColor: '#DC2626',
-                          color: '#FFFFFF',
-                          border: '2px solid #000000',
-                          boxShadow: '3px 3px 0px #000000',
-                          fontWeight: 'bold',
-                          fontSize: '10px',
+                          padding: '8px 12px',
+                          backgroundColor: '#FEF2F2',
+                          color: '#991B1B',
+                          border: '1px solid #E5B8B8',
+                          borderRadius: '2px',
+                          fontWeight: 600,
+                          fontSize: '11px',
                           cursor: 'pointer'
                         }}
                       >
-                        [DIESE RELATION LÖSCHEN]
+                        {t('Delete this relation', 'Diese Relation löschen', 'Supprimer cette relation')}
                       </button>
                     </div>
 
@@ -3931,7 +4257,9 @@ export default function App() {
                         marginBottom: '4px'
                       }}
                     >
-                      {selectedRoute.has_suspicion ? '[FORENSISCHER VERDACHT: EXPEDITIONS-VEKTOR]' : '[RESTITUTIONS-VEKTOR: RAUBROUTE]'}
+                      {selectedRoute.has_suspicion
+                        ? t('[FORENSIC SUSPICION: EXPEDITION VECTOR]', '[FORENSISCHER VERDACHT: EXPEDITIONS-VEKTOR]', "[SOUPÇON FORENSIQUE : VECTEUR D'EXPÉDITION]")
+                        : t('[RESTITUTION VECTOR: LOOT ROUTE]', '[RESTITUTIONS-VEKTOR: RAUBROUTE]', '[VECTEUR DE RESTITUTION : ROUTE DE PILLAGE]')}
                     </span>
                     <h2 style={{ margin: '4px 0 0 0', fontSize: '14px', fontWeight: 900, wordBreak: 'break-word', color: '#000000' }}>
                       {selectedRoute.origin_name} &rarr; {selectedRoute.depot_city}
@@ -3955,35 +4283,45 @@ export default function App() {
                 {/* Route Metriken */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}>
                   <div style={{ border: '1px solid #000000', padding: '8px', backgroundColor: '#F8FAFC' }}>
-                    <div style={{ fontSize: '8px', color: '#64748B', fontWeight: 'bold' }}>HERKUNFTS-DISTRIKT / POLITY (KAMERUN):</div>
+                    <div style={{ fontSize: '8px', color: '#64748B', fontWeight: 'bold' }}>
+                      {t('ORIGIN DISTRICT / POLITY (CAMEROON):', 'HERKUNFTS-DISTRIKT / POLITY (KAMERUN):', "DISTRICT / POLITY D'ORIGINE (CAMEROUN) :")}
+                    </div>
                     <div style={{ fontSize: '11px', fontWeight: 'bold', color: '#000000', marginTop: '2px' }}>
                       {selectedRoute.origin_name} ({selectedRoute.origin_region})
                     </div>
                   </div>
 
                   <div style={{ border: '1px solid #000000', padding: '8px', backgroundColor: '#F8FAFC' }}>
-                    <div style={{ fontSize: '8px', color: '#64748B', fontWeight: 'bold' }}>ZIEL-DEPOT (MUSEUM):</div>
+                    <div style={{ fontSize: '8px', color: '#64748B', fontWeight: 'bold' }}>
+                      {t('TARGET DEPOT (MUSEUM):', 'ZIEL-DEPOT (MUSEUM):', 'DÉPÔT CIBLE (MUSÉE) :')}
+                    </div>
                     <div style={{ fontSize: '11px', fontWeight: 'bold', color: '#000000', marginTop: '2px' }}>
                       {selectedRoute.depot_name}
                     </div>
                   </div>
 
                   <div style={{ border: '1px solid #000000', padding: '8px', backgroundColor: '#FEF2F2', borderLeft: '4px solid #DC2626' }}>
-                    <div style={{ fontSize: '8px', color: '#991B1B', fontWeight: 'bold' }}>KULTURGÜTER AUF DIESEM VEKTOR:</div>
+                    <div style={{ fontSize: '8px', color: '#991B1B', fontWeight: 'bold' }}>
+                      {t('CULTURAL OBJECTS ON THIS VECTOR:', 'KULTURGÜTER AUF DIESEM VEKTOR:', 'BIENS CULTURELS SUR CE VECTEUR :')}
+                    </div>
                     <div style={{ fontSize: '13px', fontWeight: 900, color: '#DC2626', marginTop: '2px' }}>
-                      {selectedRoute.object_count} Objekte
+                      {selectedRoute.object_count} {t('objects', 'Objekte', 'objets')}
                     </div>
                   </div>
 
                   <div style={{ border: '1px solid #000000', padding: '8px', backgroundColor: '#F8FAFC' }}>
-                    <div style={{ fontSize: '8px', color: '#64748B', fontWeight: 'bold' }}>KOLONIALOFFIZIERE / TÄTER:</div>
+                    <div style={{ fontSize: '8px', color: '#64748B', fontWeight: 'bold' }}>
+                      {t('COLONIAL OFFICERS / PERPETRATORS:', 'KOLONIALOFFIZIERE / TÄTER:', 'OFFICIERS COLONIAUX / AUTEURS :')}
+                    </div>
                     <div style={{ fontSize: '10px', fontWeight: 'bold', color: '#B45309', marginTop: '2px' }}>
-                      {selectedRoute.actors.join(', ') || 'Schutztruppe / Nicht namentlich erfasst'}
+                      {selectedRoute.actors.join(', ') || t('Schutztruppe / Not named individually', 'Schutztruppe / Nicht namentlich erfasst', 'Schutztruppe / Non identifiés nominativement')}
                     </div>
                   </div>
 
                   <div style={{ border: '1px solid #000000', padding: '8px', backgroundColor: '#F8FAFC' }}>
-                    <div style={{ fontSize: '8px', color: '#64748B', fontWeight: 'bold' }}>MILITÄRISCHE EXPEDITIONEN:</div>
+                    <div style={{ fontSize: '8px', color: '#64748B', fontWeight: 'bold' }}>
+                      {t('MILITARY EXPEDITIONS:', 'MILITÄRISCHE EXPEDITIONEN:', 'EXPÉDITIONS MILITAIRES :')}
+                    </div>
                     <div style={{ fontSize: '10px', fontWeight: 'bold', color: '#000000', marginTop: '2px' }}>
                       {selectedRoute.expeditions.join(', ')}
                     </div>
@@ -3996,24 +4334,31 @@ export default function App() {
                   disabled={isGeneratingBatch}
                   style={{
                     width: '100%',
-                    padding: '8px 12px',
-                    backgroundColor: '#000000',
+                    padding: '9px 12px',
+                    backgroundColor: '#141413',
                     color: '#FFFFFF',
-                    border: '2px solid #000000',
-                    boxShadow: '3px 3px 0px #DC2626',
-                    fontSize: '9px',
-                    fontWeight: 900,
+                    border: 'none',
+                    borderLeft: '3px solid #991B1B',
+                    borderRadius: '2px',
+                    fontSize: '11px',
+                    fontWeight: 600,
                     cursor: isGeneratingBatch ? 'wait' : 'pointer',
                     marginBottom: '16px'
                   }}
                 >
-                  {isGeneratingBatch ? '[BÜNDLE ROUTEN-ARCHIV...]' : `[ALLE ${selectedRoute.object_count} DOSSIERS DIESER ROUTE EXPORTIEREN (ZIP)]`}
+                  {isGeneratingBatch
+                    ? t('Packaging route archive…', 'Bündle Routen-Archiv…', "Compilation de l'archive…")
+                    : t(
+                        `Export all ${selectedRoute.object_count} dossiers on this route`,
+                        `Alle ${selectedRoute.object_count} Dossiers dieser Route exportieren`,
+                        `Exporter les ${selectedRoute.object_count} dossiers de cette route`
+                      )}
                 </button>
 
                 {/* Liste der Kulturgüter */}
                 <div>
                   <div style={{ fontSize: '9px', fontWeight: 900, color: '#000000', marginBottom: '8px', letterSpacing: '0.5px' }}>
-                    RAUBKUNST-SUBJEKTE ({selectedRoute.objects.length}):
+                    {t('LOOTED HERITAGE OBJECTS', 'RAUBKUNST-SUBJEKTE', 'BIENS CULTURELS PILLÉS')} ({selectedRoute.objects.length}):
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '380px', overflowY: 'auto' }}>
                     {selectedRoute.objects.map((obj: any, idx: number) => (
@@ -4044,25 +4389,25 @@ export default function App() {
                           </span>
                           {obj.contested && (
                             <span style={{ fontSize: '7px', fontWeight: 'bold', backgroundColor: '#CA8A04', color: '#FFFFFF', padding: '1px 4px' }}>
-                              DISSONANZ
+                              {t('DISSONANCE', 'DISSONANZ', 'DISSONANCE')}
                             </span>
                           )}
                           {obj.rel_type === 'VERDACHT_AUF' && (
                             <span style={{ fontSize: '7px', fontWeight: 'bold', backgroundColor: '#0891B2', color: '#FFFFFF', padding: '1px 4px' }}>
-                              VERDACHT
+                              {t('SUSPICION', 'VERDACHT', 'SOUPÇON')}
                             </span>
                           )}
                         </div>
                         <div style={{ fontSize: '9px', color: '#475569', marginTop: '2px' }}>
-                          {obj.bez || 'Ohne Bezeichnung'}
+                          {obj.bez || t('Untitled', 'Ohne Bezeichnung', 'Sans désignation')}
                         </div>
                         {obj.actor && (
                           <div style={{ fontSize: '8px', color: '#B45309', marginTop: '2px' }}>
-                            Täter: {obj.actor}
+                            {t('Actor:', 'Täter:', 'Acteur :')} {obj.actor}
                           </div>
                         )}
                         <div style={{ fontSize: '7px', color: '#0284C7', marginTop: '4px', fontWeight: 'bold' }}>
-                          [KLICKEN: EINZEL-DOSSIER ÖFFNEN]
+                          {t('[CLICK: OPEN INDIVIDUAL DOSSIER]', '[KLICKEN: EINZEL-DOSSIER ÖFFNEN]', '[CLIQUER : OUVRIR LE DOSSIER INDIVIDUEL]')}
                         </div>
                       </div>
                     ))}
@@ -4073,12 +4418,12 @@ export default function App() {
           </aside>
         )}
 
-      {/* Brutalist Researcher Login Modal */}
+      {/* Archival Researcher Authorization Modal */}
       {showLoginModal && (
         <div style={{
           position: 'fixed',
           inset: 0,
-          backgroundColor: 'rgba(0,0,0,0.65)',
+          backgroundColor: 'rgba(20,20,19,0.55)',
           zIndex: 99999,
           display: 'flex',
           alignItems: 'center',
@@ -4087,54 +4432,108 @@ export default function App() {
         }}>
           <div style={{
             backgroundColor: '#FFFFFF',
-            border: '3px solid #000000',
-            boxShadow: '6px 6px 0px #000000',
-            width: '90%',
-            maxWidth: '440px',
+            border: '1px solid #1C1B19',
+            borderRadius: '2px',
+            boxShadow: '0 20px 50px rgba(20,20,19,0.24)',
+            width: '92%',
+            maxWidth: '450px',
             padding: '24px',
-            fontFamily: "'Space Mono', monospace"
+            fontFamily: "'Inter', sans-serif"
           }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '2px solid #000000', paddingBottom: '8px' }}>
-              <div style={{ fontSize: '12px', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '1px', color: '#000000' }}>
-                [FORSCHER-AUTORISIERUNG]
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', borderBottom: '1px solid #D8D5CD', paddingBottom: '10px' }}>
+              <div style={{ fontSize: '14px', fontWeight: 700, color: '#141413' }}>
+                {t('Researcher Authorization', 'Forscher-Autorisierung', 'Autorisation chercheur')}
               </div>
               <button
                 onClick={() => { setShowLoginModal(false); setLoginError(null); }}
-                style={{
-                  border: '1px solid #000000',
-                  backgroundColor: '#FFFFFF',
-                  color: '#000000',
-                  fontWeight: 'bold',
-                  cursor: 'pointer',
-                  padding: '2px 8px',
-                  fontSize: '12px'
-                }}
+                className="archival-btn"
+                style={{ padding: '2px 8px', fontSize: '12px' }}
               >
                 ✕
               </button>
             </div>
 
-            <p style={{ fontSize: '11px', color: '#475569', lineHeight: 1.5, marginBottom: '16px' }}>
-              Im <strong>Gast-Modus</strong> sind alle Analysen, Graph-Erkundungen, Filter, Cypher-Abfragen und Dossiers frei verfügbar. Mutierende Aktionen (Kanten anlegen/löschen, Layout festschreiben, Ingestionen) erfordern das Forscher-Passwort.
+            <p style={{ fontSize: '12px', color: '#52514C', lineHeight: 1.55, marginBottom: '14px', marginTop: 0 }}>
+              {lang === 'de' ? (
+                <>
+                  Im <strong>Gast-Modus</strong> sind alle Analysen, Graph-Erkundungen, Filter und Dossiers frei verfügbar. Schreibende Aktionen (Kanten anlegen/löschen, Quellen-Ingestionen, Annotationen) erfordern den Forscher-Modus.
+                </>
+              ) : lang === 'fr' ? (
+                <>
+                  En <strong>mode invité</strong>, toutes les analyses, explorations du graphe, filtres et dossiers sont librement accessibles. Les actions d'écriture (arêtes, ingestions, annotations) nécessitent le mode chercheur.
+                </>
+              ) : (
+                <>
+                  In <strong>Guest Mode</strong>, all analyses, graph explorations, filters, and dossiers are freely available. Mutating actions (creating/deleting edges, source ingestions, annotations) require researcher mode.
+                </>
+              )}
             </p>
 
+            {isStaticSnapshotMode() && (
+              <div style={{
+                marginBottom: '16px',
+                padding: '12px 14px',
+                backgroundColor: '#F0FDF4',
+                border: '1px solid #86EFAC',
+                borderLeft: '3px solid #166534',
+                borderRadius: '2px'
+              }}>
+                <div style={{ fontSize: '11.5px', fontWeight: 700, color: '#166534', marginBottom: '4px' }}>
+                  {t(
+                    'Public Browser Sandbox — No Password Required',
+                    'Öffentliche Browser-Sandbox — Kein Passwort nötig',
+                    'Bac à sable navigateur public — Sans mot de passe'
+                  )}
+                </div>
+                <div style={{ fontSize: '11px', color: '#166534', lineHeight: 1.5, marginBottom: '10px', opacity: 0.9 }}>
+                  {t(
+                    'All source ingestions, photo-chain commits, annotations, and edge edits are saved privately in your browser (localStorage) without modifying the shared server.',
+                    'Alle Quellen-Ingestionen, Foto-Ketten-Commits, Annotationen und Kanten-Änderungen werden privat in deinem Browser (localStorage) gespeichert — ohne den öffentlichen Server zu verändern.',
+                    'Toutes les ingestions, chaînes photo, annotations et éditions restent enregistrées localement dans votre navigateur (localStorage).'
+                  )}
+                </div>
+                <button
+                  type="button"
+                  data-testid="sandbox-login-btn"
+                  onClick={handleSandboxLogin}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    backgroundColor: '#166534',
+                    color: '#FFFFFF',
+                    border: 'none',
+                    borderRadius: '2px',
+                    fontSize: '11.5px',
+                    fontWeight: 600,
+                    cursor: 'pointer'
+                  }}
+                >
+                  {t(
+                    'Enable Local Sandbox Researcher Mode',
+                    'Lokalen Sandbox-Forschermodus aktivieren',
+                    'Activer le mode chercheur bac à sable'
+                  )}
+                </button>
+              </div>
+            )}
+
             <form onSubmit={handleLogin}>
-              <div style={{ marginBottom: '16px' }}>
-                <label style={{ display: 'block', fontSize: '10px', fontWeight: 'bold', textTransform: 'uppercase', marginBottom: '6px', color: '#000000' }}>
-                  Forscher-Passwort (Marianne)
+              <div style={{ marginBottom: '14px' }}>
+                <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, marginBottom: '6px', color: '#3F3E3A' }}>
+                  {t('Server Researcher Password', 'Server-Forscher-Passwort', 'Mot de passe chercheur serveur')}
                 </label>
                 <input
                   type="password"
                   value={loginPassword}
                   onChange={(e) => setLoginPassword(e.target.value)}
-                  placeholder="Passwort eingeben..."
-                  autoFocus
+                  placeholder={t('Enter password…', 'Passwort eingeben…', 'Saisir le mot de passe…')}
+                  autoFocus={!isStaticSnapshotMode()}
                   style={{
                     width: '100%',
                     padding: '8px 10px',
-                    border: '2px solid #000000',
+                    border: '1px solid #D8D5CD',
+                    borderRadius: '2px',
                     fontSize: '12px',
-                    fontFamily: "'Space Mono', monospace",
                     boxSizing: 'border-box',
                     outline: 'none'
                   }}
@@ -4143,13 +4542,14 @@ export default function App() {
 
               {loginError && (
                 <div style={{
-                  padding: '8px',
-                  backgroundColor: '#FEE2E2',
-                  border: '1px solid #DC2626',
-                  color: '#DC2626',
-                  fontSize: '10px',
-                  fontWeight: 'bold',
-                  marginBottom: '16px'
+                  padding: '8px 10px',
+                  backgroundColor: '#FEF2F2',
+                  border: '1px solid #E5B8B8',
+                  borderLeft: '3px solid #991B1B',
+                  color: '#991B1B',
+                  fontSize: '11px',
+                  fontWeight: 500,
+                  marginBottom: '14px'
                 }}>
                   {loginError}
                 </div>
@@ -4159,33 +4559,20 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => { setShowLoginModal(false); setLoginError(null); }}
-                  style={{
-                    padding: '8px 12px',
-                    backgroundColor: '#FFFFFF',
-                    border: '2px solid #000000',
-                    boxShadow: '2px 2px 0px #000000',
-                    fontSize: '10px',
-                    fontWeight: 'bold',
-                    cursor: 'pointer'
-                  }}
+                  className="archival-btn"
+                  style={{ padding: '7px 12px', fontSize: '11.5px' }}
                 >
-                  ABBRECHEN (GAST)
+                  {t('Cancel', 'Abbrechen', 'Annuler')}
                 </button>
                 <button
                   type="submit"
                   disabled={isLoggingIn || !loginPassword.trim()}
-                  style={{
-                    padding: '8px 14px',
-                    backgroundColor: '#000000',
-                    color: '#FFFFFF',
-                    border: '2px solid #000000',
-                    boxShadow: '2px 2px 0px #000000',
-                    fontSize: '10px',
-                    fontWeight: 'bold',
-                    cursor: (isLoggingIn || !loginPassword.trim()) ? 'not-allowed' : 'pointer'
-                  }}
+                  className="archival-btn archival-btn-primary"
+                  style={{ padding: '7px 14px', fontSize: '11.5px' }}
                 >
-                  {isLoggingIn ? 'VERIFIZIERE...' : 'ENTSPERREN'}
+                  {isLoggingIn
+                    ? t('Verifying…', 'Prüfe…', 'Vérification…')
+                    : t('Sign in', 'Anmelden', 'Connexion')}
                 </button>
               </div>
             </form>

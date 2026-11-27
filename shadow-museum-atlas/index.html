@@ -1,31 +1,41 @@
 <!doctype html>
-<html lang="de">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>PROJECT ECHO // Shadow Museum Provenance Atlas</title>
-    <meta name="description" content="Forensischer Provenienz-Multigraph, RootSIFT+RANSAC Bildreihen-Re-Identifikation und HLKO-Restitutions-Dossiers fuer koloniale Sammlungsbestaende." />
+    <title>Project Echo — Shadow Museum Provenance Atlas</title>
+    <meta name="description" content="Forensic provenance multigraph, RootSIFT+RANSAC photo-chain re-identification, and court-ready Hague Convention restitution dossiers for colonial museum collections." />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://echo.aethelburg.network/" />
-    <meta property="og:title" content="PROJECT ECHO // Shadow Museum Provenance Atlas" />
+    <meta property="og:title" content="Project Echo — Shadow Museum Provenance Atlas" />
     <meta property="og:description" content="Forensic provenance multigraph, geometric photo-chain re-identification, and court-ready HLKO restitution dossiers." />
     <link rel="canonical" href="https://echo.aethelburg.network/" />
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
-    <div id="echo-legal-widget" style="position:fixed;bottom:8px;right:12px;z-index:9990;font-family:'Space Mono',monospace;font-size:10px;">
-      <button onclick="document.getElementById('echo-legal-modal').style.display='flex'" style="background:#fff;border:1px solid #000;padding:3px 7px;cursor:pointer;font-family:inherit;font-size:10px;">IMPRESSUM &amp; DATENSCHUTZ (§ 5 DDG)</button>
+    <div id="echo-legal-widget" style="position:fixed;bottom:10px;right:12px;z-index:9990;font-family:'Inter',sans-serif;font-size:11px;">
+      <button id="echo-legal-btn" onclick="document.getElementById('echo-legal-modal').style.display='flex'" style="background:rgba(255,255,255,0.94);color:#3F3E3A;border:1px solid #C8C4BA;padding:4px 9px;cursor:pointer;font-family:inherit;font-size:10.5px;font-weight:500;letter-spacing:0.01em;backdrop-filter:blur(4px);">Legal Notice &amp; Privacy (§ 5 DDG)</button>
     </div>
-    <div id="echo-legal-modal" onclick="if(event.target===this)this.style.display='none'" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9999;align-items:center;justify-content:center;padding:16px;font-family:'Space Mono',monospace;font-size:12px;line-height:1.55;">
-      <div style="background:#fff;border:3px solid #000;box-shadow:6px 6px 0 #000;max-width:560px;width:100%;padding:20px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #000;padding-bottom:10px;margin-bottom:12px;">
-          <strong>IMPRESSUM &amp; DATENSCHUTZ (§ 5 DDG / DSGVO)</strong>
-          <button onclick="document.getElementById('echo-legal-modal').style.display='none'" style="background:#fff;border:1px solid #000;padding:2px 8px;cursor:pointer;font-family:inherit;">[X]</button>
+    <div id="echo-legal-modal" onclick="if(event.target===this)this.style.display='none'" style="display:none;position:fixed;inset:0;background:rgba(20,20,19,0.52);z-index:9999;align-items:center;justify-content:center;padding:16px;font-family:'Inter',sans-serif;font-size:13px;line-height:1.6;backdrop-filter:blur(2px);">
+      <div style="background:#FFFFFF;border:1px solid #1C1B19;box-shadow:0 18px 48px rgba(20,20,19,0.22);max-width:560px;width:100%;padding:24px;color:#141413;">
+        <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #D8D5CD;padding-bottom:12px;margin-bottom:16px;">
+          <strong id="echo-legal-title" style="font-size:14px;font-weight:700;letter-spacing:-0.01em;">Legal Notice &amp; Privacy (§ 5 DDG / GDPR)</strong>
+          <button onclick="document.getElementById('echo-legal-modal').style.display='none'" style="background:#F7F6F2;color:#141413;border:1px solid #D8D5CD;padding:3px 9px;cursor:pointer;font-family:inherit;font-size:12px;">✕</button>
         </div>
-        <p style="margin:0 0 12px 0;"><strong>1. Angaben gemaess § 5 DDG:</strong><br/>Niklas Herlyn — Project Echo / Auratic Systems<br/>Taunusblick 10, 61191 Rosbach v. d. Hoehe, Deutschland<br/>E-Mail: nika.hrlyn@gmail.com<br/>Verantwortlich i.S.d. § 18 Abs. 2 MStV: Niklas Herlyn (Anschrift wie oben)</p>
-        <p style="margin:0;"><strong>2. Datenschutzerklaerung (DSGVO):</strong><br/>Alle Schriftarten (Webfonts) und Skripte werden lokal gehostet (keine Uebermittlung an Google Fonts). Technisch notwendige Server-Logfiles werden gemaess Art. 6 Abs. 1 lit. f DSGVO ausschliesslich zur Systemsicherheit verarbeitet.</p>
+        <div id="echo-legal-body-en">
+          <p style="margin:0 0 12px 0;"><strong>1. Legal Disclosure pursuant to § 5 DDG (German Digital Services Act):</strong><br/>Niklas Herlyn — Project Echo / Auratic Systems<br/>Taunusblick 10, 61191 Rosbach v. d. Höhe, Germany<br/>Email: nika.hrlyn@gmail.com<br/>Responsible pursuant to § 18 (2) MStV: Niklas Herlyn (address as above)</p>
+          <p style="margin:0;color:#474642;"><strong>2. Privacy Notice (GDPR):</strong><br/>All fonts and scripts are self-hosted (no requests sent to Google Fonts or third-party trackers). Technically necessary server log files are processed solely for system security pursuant to Art. 6 (1) lit. f GDPR.</p>
+        </div>
+        <div id="echo-legal-body-de" style="display:none;">
+          <p style="margin:0 0 12px 0;"><strong>1. Angaben gemäß § 5 DDG:</strong><br/>Niklas Herlyn — Project Echo / Auratic Systems<br/>Taunusblick 10, 61191 Rosbach v. d. Höhe, Deutschland<br/>E-Mail: nika.hrlyn@gmail.com<br/>Verantwortlich i.S.d. § 18 Abs. 2 MStV: Niklas Herlyn (Anschrift wie oben)</p>
+          <p style="margin:0;color:#474642;"><strong>2. Datenschutzerklärung (DSGVO):</strong><br/>Alle Schriftarten (Webfonts) und Skripte werden lokal gehostet (keine Übermittlung an Google Fonts). Technisch notwendige Server-Logfiles werden gemäß Art. 6 Abs. 1 lit. f DSGVO ausschließlich zur Systemsicherheit verarbeitet.</p>
+        </div>
+        <div id="echo-legal-body-fr" style="display:none;">
+          <p style="margin:0 0 12px 0;"><strong>1. Mentions légales conformément au § 5 DDG (loi allemande sur les services numériques) :</strong><br/>Niklas Herlyn — Project Echo / Auratic Systems<br/>Taunusblick 10, 61191 Rosbach v. d. Höhe, Allemagne<br/>E-mail : nika.hrlyn@gmail.com<br/>Responsable éditorial (§ 18 al. 2 MStV) : Niklas Herlyn (adresse ci-dessus)</p>
+          <p style="margin:0;color:#474642;"><strong>2. Politique de confidentialité (RGPD) :</strong><br/>Toutes les polices et scripts sont auto-hébergés (aucune requête vers Google Fonts ni traceur tiers). Les journaux techniques du serveur sont traités exclusivement pour la sécurité du système conformément à l'art. 6 par. 1 lit. f du RGPD.</p>
+        </div>
       </div>
     </div>
   </body>

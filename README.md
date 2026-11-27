@@ -3,69 +3,69 @@
 [![Live Demo](https://img.shields.io/badge/Live_Demo-echo.aethelburg.network-16a34a.svg)](https://echo.aethelburg.network)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPLv3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![Architecture](https://img.shields.io/badge/Engine-FastAPI%20%2B%20Embedded%20Graph%20%7C%20Neo4j-black)](#)
-[![Legal Basis](https://img.shields.io/badge/Forensics-HLKO%20Art.%2056%20%7C%20Washington%20Principles-991b1b)](#)
+[![Legal Basis](https://img.shields.io/badge/Forensics-Hague%20IV%20Art.%2056%20%7C%20Washington%20Principles-991b1b)](#)
 
-> **Serverless Live-Demo (sofort im Browser ohne Login/Installation):** **[https://echo.aethelburg.network](https://echo.aethelburg.network)**
+> **Serverless Live Demo (instant in-browser, no login or install required — trilingual EN / DE / FR):** **[https://echo.aethelburg.network](https://echo.aethelburg.network)**
 
-**Project Echo (`Shadow Museum Provenance Atlas`)** ist eine forensische Graph- und Geodaten-Forschungsumgebung zur Rekonstruktion kolonialer Provenienz-Netzwerke (Kamerun 1884–1916), zur Aufdeckung musealer Narrativ-Kollisionen (*"Schenkung"* vs. *Militärischer Raubzug*) und zur automatisierten Erstellung gerichtsverwertbarer PDF-Restitutionsdossiers.
-
----
-
-## Kernfunktionen
-
-1. **Dual-Engine Wissensgraph (Zero-Docker Embedded Store + optionales Neo4j Bolt)**:
-   - Startet **sofort ohne Docker** direkt aus dem verifizierten Forschungs-Snapshot `seed_graph.json.gz` (**`2.223` Knoten**, **`6.628` belegte Relationen**, `2.148` Kulturgut-Subjekte, `60` koloniale Akteure, `8` deutsche Museumsdepots, `7` Primärpublikationen).
-   - Verbindet sich automatisch mit einer lokalen oder externen **Neo4j-5-Instanz** (`bolt://localhost:7687`), sobald diese verfügbar ist (für > 40.000 Objekte im Makro-Cluster-Modus).
-
-2. **Multigraph-Dissonanz & Forensische Spezialfilter**:
-   - **Contested Narratives (`1.999` Kollisionen)**: Stellt offizielle Museumsinventar-Einträge (`SCHENKTE` / `VERKAUFTE_AN`) unmittelbar den militärischen Primärquellen (`RAUBTE` / `ENTEIGNETE` mit Seitenzahl-Belegen u. a. aus dem *Atlas der Abwesenheit*) gegenüber.
-   - **Provenienzlücken (`83` Depots ohne Erwerbskette)** inklusive Ein-Klick-Generator für Auskunftsersuchen nach dem Informationsfreiheitsgesetz (IFG).
-   - **Ghost-Subjekte & Probabilistische Verdachtskanten (`VERDACHT_AUF`)**: Identifiziert verschollene Beutekunst ohne heutigen Depotnachweis sowie zeitlich-räumliche Expeditions-Korrelationen.
-
-3. **Geodätische Restitutions-Karte (`[GEO-KARTE (RESTITUTION)]`) & POI-Fallakte**:
-   - Interaktive Projektion von `48` historischen Polities/Distrikten Kameruns, `243` dokumentierten Militär- und Strafexpeditionen und `71` Depot-Transfervektoren nach Europa sowie ein kuratierbares **Leitobjekt-Pinboard (`POIs`)** für gezielte Einzelfall-Restitutionen.
-
-4. **Visuelle Foto-Ketten-Forensik (`[BILD-FORENSIK (FOTO-KETTE)]`)**:
-   - Rekonstruiert Objektbiografien **ohne durchgängige Inventarnummer** allein über datierte historische Bildreihen (*Feldaufnahme Glasplatte 1902* $\rightarrow$ *Händlerkatalog 1908* $\rightarrow$ *heutige Depotaufnahme*).
-   - **Kulturell respektvolle Strukturgeometrie statt Pauschal-Stil-KI**: Beleuchtungsinvariante `RootSIFT-128D` Mikrostruktur-Deskriptoren kombiniert mit striktem **6-DOF Affin-RANSAC** und kalibrierter **Shannon-Entropie $H(p)$** weisen verwandte Schnitzwerke derselben Kultur sauber als Nicht-Identisch zurück und geben Spuren erst nach **Human-in-the-Loop-Fachprüfung** in den Wissensgraphen frei.
-
-5. **Globale Mehrsprachige Quellen-Ingestion (`DE / EN / FR`) & HLKO-Restitutionspakete**:
-   - Erkennt neben deutschen Sammlungen (`III C`, `VK`) weltweit Inventarformate (`British Museum Af1897,...`, `Musée du quai Branly 71.1892...`, `AfricaMuseum Tervuren EO.0.0...`), internationale Museen, Herkunftsgemeinschaften (u. a. *Benin/Edo, Asante, Dahomey, Nso, Bamum, Ovaherero/Nama, Maji-Maji, Maqdala, Rapa Nui*) sowie dynamisch betitelte historische Akteure in PDF-, TXT-, CSV- und XLSX-Quellen.
-   - Erzeugt per Klick druckreife **Einzel-Restitutionsdossiers (PDF)**, **Routen-/Akteurs-Sammelarchive (ZIP)** sowie asynchrone **völkerrechtliche Restitutionsersuchen nach Art. 46, 47, 56 HLKO**.
+**Project Echo (`Shadow Museum Provenance Atlas`)** is a forensic knowledge-graph, geospatial, and visual-provenance research environment for reconstructing colonial provenance networks (Cameroon 1884–1916), surfacing museum narrative collisions (*"donation"* vs. *military looting raid*), and generating court-ready PDF restitution dossiers.
 
 ---
 
-## Schnelleinstieg (Zero-Docker)
+## Core Capabilities
+
+1. **Dual-Engine Knowledge Graph (Zero-Docker Embedded Store + Optional Neo4j Bolt)**:
+   - Launches **instantly without Docker** directly from the verified research snapshot `seed_graph.json.gz` (**`2,223` nodes**, **`6,628` sourced relations**, `2,148` cultural-heritage objects, `60` colonial actors, `8` German museum depots, `7` primary publications).
+   - Automatically connects to a local or remote **Neo4j 5 instance** (`bolt://localhost:7687`) whenever available (scaling to > 40,000 objects in macro-cluster mode).
+
+2. **Multigraph Dissonance & Forensic Filters**:
+   - **Contested Narratives (`1,999` collisions)**: Juxtaposes official museum inventory claims (`SCHENKTE` / *donated*, `VERKAUFTE_AN` / *sold*) directly against primary military sources (`RAUBTE` / *looted*, `ENTEIGNETE` / *confiscated*, with page-level citations including the *Atlas der Abwesenheit*).
+   - **Provenance Gaps (`83` depot holdings without an acquisition chain)** including a one-click Freedom-of-Information (`FOIA` / German `IFG`) accession-ledger inquiry generator.
+   - **Ghost Objects & Probabilistic Suspicion Edges (`VERDACHT_AUF`)**: Surfaces missing looted artifacts with no confirmed current depot alongside spatio-temporal military expedition correlations.
+
+3. **Geospatial Restitution Map (`[GEO-MAP (RESTITUTION)]`) & Key-Object Case Board (`POIs`)**:
+   - Interactive projection of `48` historical Cameroonian polities/districts, `243` documented military and punitive expeditions, and `71` depot transfer vectors to Europe, paired with a curatable **Key Objects watchlist (`POIs`)** for targeted restitution casework.
+
+4. **Visual Photo-Chain Forensics (`[VISUAL FORENSICS (PHOTO-CHAIN)]`)**:
+   - Reconstructs object biographies **without continuous inventory numbers** solely across dated historical photo series (*1902 glass-plate field photograph* $\rightarrow$ *1908 dealer sales catalog* $\rightarrow$ *contemporary depot digitization*).
+   - **Culturally respectful structural geometry instead of generic style AI**: Illumination-invariant `RootSIFT-128D` microstructure descriptors paired with strict **6-DOF Affine RANSAC** and calibrated **Shannon entropy $H(p)$** cleanly reject stylistically related carvings from the same culture as non-identical, committing candidate chains to the knowledge graph only after **Human-in-the-Loop** specialist approval.
+
+5. **Multilingual Source Ingestion (`EN / DE / FR`) & Hague Convention Restitution Packages**:
+   - Recognizes German (`III C`, `VK`) and international inventory formats (`British Museum Af1897,...`, `Musée du quai Branly 71.1892...`, `AfricaMuseum Tervuren EO.0.0...`), international museums, communities of origin (including *Benin/Edo, Asante, Dahomey, Nso, Bamum, Ovaherero/Nama, Maji-Maji, Maqdala, Rapa Nui*), and dynamically titled historical actors across PDF, TXT, CSV, and XLSX sources.
+   - One-click generation of print-ready **individual restitution dossiers (PDF)**, **route/actor batch archives (ZIP)**, and asynchronous **international-law restitution packages citing Hague Convention IV (HLKO) Arts. 46, 47, and 56**.
+
+---
+
+## Quick Start (Zero-Docker)
 
 ```bash
-# 1. Python-Abhängigkeiten & Frontend-Bundle einmalig bauen
+# 1. Install Python dependencies & build the frontend bundle once
 pip install -r requirements.txt
 cd shadow-museum-atlas && npm install && npm run build && cd ..
 
-# 2. Komplettes System (API + kompiliertes Shadow-Museum-Frontend) auf Port 8088 starten
+# 2. Launch the complete system (API + compiled Shadow Museum frontend) on port 8088
 python3 serve_graph_api.py
 ```
 
-Im Browser öffnen:
+Open in your browser:
 **[http://localhost:8088](http://localhost:8088)**
 
-*(Für Schreiboperationen wie Annotationen, manuelle Kanten oder Dokument-Uploads `ECHO_RESEARCHER_KEY` setzen, z. B. `ECHO_RESEARCHER_KEY=mein-schluessel python3 serve_graph_api.py`.)*
+*(For write operations such as annotations, manual edges, or document uploads, set `ECHO_RESEARCHER_KEY`, e.g. `ECHO_RESEARCHER_KEY=my-secret-key python3 serve_graph_api.py`.)*
 
-### Optional: Frontend-Entwicklungsmodus & Neo4j-Skalierung
+### Optional: Frontend Dev Mode & Neo4j Scaling
 ```bash
-# Optionales Neo4j-Backend via Docker:
+# Optional Neo4j backend via Docker:
 docker run -d --name project-echo-neo4j -p 7474:7474 -p 7687:7687 -e NEO4J_AUTH=none neo4j:5
 python3 import_seed.py
 
-# Frontend neu bauen:
+# Rebuild frontend:
 cd shadow-museum-atlas && npm install && npm run build
 ```
 
 ---
 
-## Integritäts- & Sicherheits-Testsuite
+## Integrity & Security Test Suite
 
 ```bash
 python3 -m unittest discover tests -v
 ```
-Prüft Authentifizierung (`{SHA}`, `sha256$`, POSIX `$6$` crypt, Gast-/Forscher-Isolierung), alle Embedded-Graph-Endpunkte, PDF-/ZIP-/HLKO-Generierung, Pfad-Traversal-Schutz sowie die Shannon-Entropie-Invarianten (`backend/echo_lgnn_tensor.py`).
+Verifies authentication (`{SHA}`, `sha256$`, POSIX `$6$` crypt, guest/researcher isolation), all embedded-graph API endpoints, PDF/ZIP/HLKO dossier generation, path-traversal hardening, and Shannon-entropy calibration invariants (`backend/echo_lgnn_tensor.py`).

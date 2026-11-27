@@ -3,6 +3,7 @@ import React, { useEffect, useRef, useState, useMemo } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import fallbackGeodata from './geodata.json';
+import { useLang, metricFilterLabel } from './i18n';
 
 interface GeodataMapProps {
   activeMetricFilter: string | null;
@@ -52,6 +53,7 @@ export default function GeodataMap({
   onSelectRoute,
   selectedRouteId
 }: GeodataMapProps) {
+  const { lang, t } = useLang();
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
   const layersGroupRef = useRef<L.LayerGroup | null>(null);
@@ -195,6 +197,7 @@ export default function GeodataMap({
     if (!map || !layersGroup) return;
 
     layersGroup.clearLayers();
+    const tr = (en: string, de: string, fr: string) => (lang === 'de' ? de : lang === 'fr' ? fr : en);
 
     // 3.1 Render Restitution Vectors (Curved Arcs)
     filteredData.routes.forEach((route: any) => {
@@ -221,13 +224,13 @@ export default function GeodataMap({
 
       // Tooltip
       const tooltipContent = `
-        <div style="font-family: 'Space Mono', monospace; font-size: 10px; padding: 4px 6px; background: #000; color: #fff; border: 2px solid ${strokeColor};">
-          <div style="font-weight: 900; color: ${strokeColor};">[RAUB-VEKTOR: ${route.origin_name.toUpperCase()} &rarr; ${route.depot_city.toUpperCase()}]</div>
-          <div style="margin-top: 3px; font-size: 9px;"><b>Kulturgüter:</b> ${route.object_count} Objekte</div>
-          <div style="font-size: 8px; color: #94A3B8;"><b>Depot:</b> ${route.depot_name}</div>
-          <div style="font-size: 8px; color: #F59E0B;"><b>Expedition:</b> ${route.expeditions.join(', ')}</div>
-          <div style="font-size: 8px; color: #CBD5E1;"><b>Akteure:</b> ${route.actors.join(', ') || 'Unbekannt'}</div>
-          <div style="margin-top: 4px; font-size: 8px; color: #38BDF8; font-weight: bold;">[KLICKEN FÜR FORENSISCHE FALLAKTE]</div>
+        <div style="font-family: 'Inter', sans-serif; font-size: 11.5px; padding: 6px 9px; background: #141413; color: #F7F6F2; border: 1px solid ${strokeColor}; border-left: 3px solid ${strokeColor};">
+          <div style="font-weight: 700; color: #FFFFFF;">${route.origin_name} &rarr; ${route.depot_city}</div>
+          <div style="margin-top: 3px; font-size: 10.5px;"><b>${tr('Objects', 'Kulturgüter', 'Biens culturels')}:</b> <span style="font-family:'Space Mono',monospace;">${route.object_count}</span></div>
+          <div style="font-size: 10px; color: #B5B3AC;"><b>${tr('Depot', 'Depot', 'Dépôt')}:</b> ${route.depot_name}</div>
+          <div style="font-size: 10px; color: #E5B869;"><b>${tr('Expedition', 'Expedition', 'Expédition')}:</b> ${route.expeditions.join(', ')}</div>
+          <div style="font-size: 10px; color: #D6D3CB;"><b>${tr('Actors', 'Akteure', 'Acteurs')}:</b> ${route.actors.join(', ') || tr('Unknown', 'Unbekannt', 'Inconnu')}</div>
+          <div style="margin-top: 4px; font-size: 9.5px; color: #7DD3FC; font-weight: 600;">${tr('Click for forensic case file →', 'Klicken für forensische Fallakte →', 'Cliquer pour le dossier forensique →')}</div>
         </div>
       `;
       polyline.bindTooltip(tooltipContent, { sticky: true, opacity: 0.95 });
@@ -291,13 +294,13 @@ export default function GeodataMap({
       });
 
       const tooltipContent = `
-        <div style="font-family: 'Space Mono', monospace; font-size: 10px; padding: 4px 6px; background: #000; color: #fff; border: 2px solid ${fillColor};">
-          <div style="font-weight: 900; color: ${fillColor};">[ORIGIN: ${orig.name.toUpperCase()}]</div>
-          <div style="font-size: 9px; margin-top: 2px;"><b>Region:</b> ${orig.region}</div>
-          <div style="font-size: 9px; color: #F87171;"><b>Raubkunst:</b> ${orig.object_count} Objekte</div>
-          <div style="font-size: 8px; color: #94A3B8;"><b>Ziel-Depots:</b> ${orig.depot_ids.length} Museen in Europa</div>
-          <div style="font-size: 8px; color: #F59E0B;"><b>Expeditionen:</b> ${orig.expeditions.slice(0, 3).join(', ')}</div>
-          <div style="margin-top: 4px; font-size: 8px; color: #38BDF8; font-weight: bold;">[KLICKEN ZUM ISOLIEREN]</div>
+        <div style="font-family: 'Inter', sans-serif; font-size: 11.5px; padding: 6px 9px; background: #141413; color: #F7F6F2; border: 1px solid ${fillColor}; border-left: 3px solid ${fillColor};">
+          <div style="font-weight: 700; color: #FFFFFF;">${orig.name} <span style="font-size:10px;color:#B5B3AC;font-weight:500;">(${tr('Origin', 'Herkunft', 'Origine')})</span></div>
+          <div style="font-size: 10px; margin-top: 2px; color: #D6D3CB;"><b>${tr('Region', 'Region', 'Région')}:</b> ${orig.region}</div>
+          <div style="font-size: 10.5px; color: #FCA5A5;"><b>${tr('Looted Heritage', 'Raubkunst', 'Patrimoine pillé')}:</b> <span style="font-family:'Space Mono',monospace;">${orig.object_count}</span></div>
+          <div style="font-size: 10px; color: #B5B3AC;"><b>${tr('Target Depots', 'Ziel-Depots', 'Dépôts cibles')}:</b> ${orig.depot_ids.length} ${tr('museums in Europe', 'Museen in Europa', 'musées en Europe')}</div>
+          <div style="font-size: 10px; color: #E5B869;"><b>${tr('Expeditions', 'Expeditionen', 'Expéditions')}:</b> ${orig.expeditions.slice(0, 3).join(', ')}</div>
+          <div style="margin-top: 4px; font-size: 9.5px; color: #7DD3FC; font-weight: 600;">${tr('Click to inspect polity →', 'Klicken zum Isolieren →', 'Cliquer pour isoler →')}</div>
         </div>
       `;
       marker.bindTooltip(tooltipContent, { sticky: true, opacity: 0.95 });
@@ -307,7 +310,11 @@ export default function GeodataMap({
           id: orig.id,
           label: orig.name,
           type: 'Polity',
-          desc: `${orig.region} | ${orig.object_count} geraubte Kulturgüter`,
+          desc: tr(
+            `${orig.region} | ${orig.object_count} looted cultural objects`,
+            `${orig.region} | ${orig.object_count} geraubte Kulturgüter`,
+            `${orig.region} | ${orig.object_count} biens culturels pillés`
+          ),
           contested: orig.contested_count > 0,
           meta: orig
         });
@@ -318,28 +325,29 @@ export default function GeodataMap({
 
     // 3.3 Render European Museum Depots
     filteredData.depots.forEach((depot: any) => {
-      // Create brutalist HTML badge for museum hubs
+      // Create archival HTML badge for museum hubs
       const depotIcon = L.divIcon({
         className: 'custom-depot-pin',
         html: `
           <div style="
-            background-color: #000000;
-            color: #FFFFFF;
-            border: 2px solid #FFFFFF;
-            box-shadow: 3px 3px 0px #DC2626;
-            padding: 3px 6px;
+            background-color: rgba(20, 20, 19, 0.94);
+            color: #F7F6F2;
+            border: 1px solid rgba(255, 255, 255, 0.45);
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
+            padding: 3px 7px;
+            border-radius: 2px;
             font-family: 'Space Mono', monospace;
-            font-size: 9px;
-            font-weight: 900;
+            font-size: 9.5px;
+            font-weight: 700;
             white-space: nowrap;
             cursor: pointer;
             display: flex;
             align-items: center;
-            gap: 4px;
+            gap: 5px;
             transform: translate(-50%, -50%);
           ">
             <span style="display:inline-block; width:6px; height:6px; background-color:#DC2626; border-radius:50%;"></span>
-            <span>${depot.city.toUpperCase()}: ${depot.object_count.toLocaleString()}</span>
+            <span>${depot.city}: ${depot.object_count.toLocaleString()}</span>
           </div>
         `,
         iconSize: [80, 24],
@@ -349,12 +357,12 @@ export default function GeodataMap({
       const marker = L.marker([depot.lat, depot.lng], { icon: depotIcon });
 
       const tooltipContent = `
-        <div style="font-family: 'Space Mono', monospace; font-size: 10px; padding: 6px 8px; background: #000; color: #fff; border: 2px solid #FFF;">
-          <div style="font-weight: 900; color: #38BDF8;">[DEPOT: ${depot.name.toUpperCase()}]</div>
-          <div style="font-size: 9px; margin-top: 2px;"><b>Standort:</b> ${depot.address}</div>
-          <div style="font-size: 9px; color: #DC2626; font-weight: bold;"><b>Geraubte Kulturgüter:</b> ${depot.object_count.toLocaleString()}</div>
-          <div style="font-size: 8px; color: #94A3B8;"><b>Kamerun-Herkunftsorte:</b> ${depot.origin_ids.length} Distrikte</div>
-          <div style="margin-top: 4px; font-size: 8px; color: #38BDF8; font-weight: bold;">[KLICKEN FÜR MUSEUMS-DOSSIER]</div>
+        <div style="font-family: 'Inter', sans-serif; font-size: 11.5px; padding: 7px 10px; background: #141413; color: #F7F6F2; border: 1px solid rgba(255,255,255,0.35);">
+          <div style="font-weight: 700; color: #FFFFFF;">${depot.name}</div>
+          <div style="font-size: 10px; margin-top: 2px; color: #B5B3AC;"><b>${tr('Location', 'Standort', 'Localisation')}:</b> ${depot.address}</div>
+          <div style="font-size: 10.5px; color: #FCA5A5; font-weight: 600;"><b>${tr('Recorded Objects', 'Kulturgüter', 'Biens culturels')}:</b> <span style="font-family:'Space Mono',monospace;">${depot.object_count.toLocaleString()}</span></div>
+          <div style="font-size: 10px; color: #B5B3AC;"><b>${tr('Origin Polities', 'Herkunftsorte', "Polities d'origine")}:</b> ${depot.origin_ids.length} ${tr('districts', 'Distrikte', 'districts')}</div>
+          <div style="margin-top: 4px; font-size: 9.5px; color: #7DD3FC; font-weight: 600;">${tr('Click for museum dossier →', 'Klicken für Museums-Dossier →', 'Cliquer pour le dossier du musée →')}</div>
         </div>
       `;
       marker.bindTooltip(tooltipContent, { sticky: true, opacity: 0.95 });
@@ -373,7 +381,7 @@ export default function GeodataMap({
       marker.addTo(layersGroup);
     });
 
-  }, [filteredData, selectedRouteId, onSelectNode, onSelectRoute]);
+  }, [filteredData, selectedRouteId, onSelectNode, onSelectRoute, lang]);
 
   // 4. Render 243 Historical Colonial Expedition Events (Optional Layer)
   useEffect(() => {
@@ -384,6 +392,7 @@ export default function GeodataMap({
     expGroup.clearLayers();
 
     if (!showExpeditions) return;
+    const tr = (en: string, de: string, fr: string) => (lang === 'de' ? de : lang === 'fr' ? fr : en);
 
     (geodata.expedition_events || []).forEach((ev: any) => {
       if (!ev.lat || !ev.lng) return;
@@ -398,19 +407,19 @@ export default function GeodataMap({
 
       const tooltipContent = `
         <div style="font-family: 'Space Mono', monospace; font-size: 9px; padding: 4px 6px; background: #000; color: #F59E0B; border: 1px solid #F59E0B; max-width: 280px;">
-          <div style="font-weight: 900;">[EXPEDITION #${ev.num}: ${ev.name}]</div>
-          <div style="font-size: 8px; color: #CBD5E1; margin-top: 2px;"><b>Zeitraum:</b> ${ev.zeitraum || '1884-1914'}</div>
-          <div style="font-size: 8px; color: #CBD5E1;"><b>Orte:</b> ${ev.orte || 'Kamerun'}</div>
-          <div style="font-size: 8px; color: #F87171;"><b>Befehlshaber:</b> ${ev.taeter || 'Schutztruppe'}</div>
+          <div style="font-weight: 900;">[${tr('EXPEDITION', 'EXPEDITION', 'EXPÉDITION')} #${ev.num}: ${ev.name}]</div>
+          <div style="font-size: 8px; color: #CBD5E1; margin-top: 2px;"><b>${tr('Period', 'Zeitraum', 'Période')}:</b> ${ev.zeitraum || '1884-1914'}</div>
+          <div style="font-size: 8px; color: #CBD5E1;"><b>${tr('Locations', 'Orte', 'Lieux')}:</b> ${ev.orte || tr('Cameroon', 'Kamerun', 'Cameroun')}</div>
+          <div style="font-size: 8px; color: #F87171;"><b>${tr('Commander', 'Befehlshaber', 'Commandant')}:</b> ${ev.taeter || 'Schutztruppe'}</div>
           ${ev.zitat ? `<div style="font-size: 8px; color: #94A3B8; font-style: italic; margin-top: 3px;">"${ev.zitat.slice(0, 120)}..."</div>` : ''}
-          ${ev.link ? `<div style="font-size: 7px; color: #38BDF8; margin-top: 3px;">[BArch Primärbeleg vorhanden]</div>` : ''}
+          ${ev.link ? `<div style="font-size: 7px; color: #38BDF8; margin-top: 3px;">[${tr('BArch primary archive record available', 'BArch Primärbeleg vorhanden', "Source primaire d'archive BArch disponible")}]</div>` : ''}
         </div>
       `;
       marker.bindTooltip(tooltipContent, { sticky: true, opacity: 0.95 });
 
       marker.addTo(expGroup);
     });
-  }, [showExpeditions, geodata]);
+  }, [showExpeditions, geodata, lang]);
 
   // Camera jump handlers
   const jumpToGlobal = () => {
@@ -438,65 +447,50 @@ export default function GeodataMap({
       <div ref={mapContainerRef} style={{ width: '100%', height: '100%', zIndex: 1 }} />
 
       {/* Floating HUD Top Left: Camera Jumps & Layer Controls */}
-      <div style={{
-        position: 'absolute',
-        top: 14,
-        left: 14,
-        zIndex: 20,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '6px'
-      }}>
+      <div className="geo-hud-left">
         {/* Navigation buttons */}
-        <div style={{
-          display: 'flex',
-          gap: '4px',
-          backgroundColor: 'rgba(0, 0, 0, 0.85)',
-          padding: '4px',
-          border: '2px solid #000000',
-          boxShadow: '3px 3px 0px #000000'
-        }}>
+        <div className="geo-hud-cam-bar">
           <button
             onClick={jumpToGlobal}
             style={{
-              padding: '4px 8px',
-              backgroundColor: '#FFFFFF',
-              color: '#000000',
-              border: '1px solid #000000',
-              fontSize: '9px',
-              fontWeight: 900,
+              padding: '5px 10px',
+              backgroundColor: '#F7F6F2',
+              color: '#141413',
+              border: '1px solid transparent',
+              fontSize: '10.5px',
+              fontWeight: 600,
               cursor: 'pointer'
             }}
           >
-            [GLOBALE VEKTOREN]
+            {t('Global Vectors', 'Globale Vektoren', 'Vecteurs globaux')}
           </button>
           <button
             onClick={jumpToCameroon}
             style={{
-              padding: '4px 8px',
-              backgroundColor: '#DC2626',
+              padding: '5px 10px',
+              backgroundColor: '#991B1B',
               color: '#FFFFFF',
-              border: '1px solid #000000',
-              fontSize: '9px',
-              fontWeight: 900,
+              border: '1px solid transparent',
+              fontSize: '10.5px',
+              fontWeight: 600,
               cursor: 'pointer'
             }}
           >
-            [FOKUS: KAMERUN]
+            {t('Focus: Cameroon', 'Fokus: Kamerun', 'Focus : Cameroun')}
           </button>
           <button
             onClick={jumpToEurope}
             style={{
-              padding: '4px 8px',
-              backgroundColor: '#000000',
-              color: '#FFFFFF',
-              border: '1px solid #FFFFFF',
-              fontSize: '9px',
-              fontWeight: 900,
+              padding: '5px 10px',
+              backgroundColor: 'transparent',
+              color: '#F7F6F2',
+              border: '1px solid rgba(255,255,255,0.28)',
+              fontSize: '10.5px',
+              fontWeight: 600,
               cursor: 'pointer'
             }}
           >
-            [FOKUS: EUROPA]
+            {t('Focus: Europe', 'Fokus: Europa', 'Focus : Europe')}
           </button>
         </div>
 
@@ -505,108 +499,81 @@ export default function GeodataMap({
           onClick={() => setShowExpeditions(!showExpeditions)}
           style={{
             padding: '5px 10px',
-            backgroundColor: showExpeditions ? '#F59E0B' : 'rgba(0, 0, 0, 0.85)',
-            color: showExpeditions ? '#000000' : '#F59E0B',
-            border: '2px solid #F59E0B',
-            boxShadow: '3px 3px 0px #000000',
-            fontSize: '9px',
-            fontWeight: 900,
+            backgroundColor: showExpeditions ? '#D97706' : 'rgba(20, 20, 19, 0.90)',
+            color: showExpeditions ? '#141413' : '#FBBF24',
+            border: '1px solid rgba(251, 191, 36, 0.55)',
+            fontSize: '10.5px',
+            fontWeight: 600,
             cursor: 'pointer',
-            textAlign: 'left'
+            textAlign: 'left',
+            alignSelf: 'flex-start',
+            borderRadius: '2px',
+            backdropFilter: 'blur(6px)'
           }}
         >
           {showExpeditions
-            ? '[EXPEDITIONEN AKTIV (243 RAIDS AUSBLENDEN)]'
-            : '[+ 243 STRAFEXPEDITIONEN EINBLENDEN (1884-1914)]'}
+            ? t('Hide 243 punitive expeditions (1884–1914)', '243 Strafexpeditionen ausblenden (1884–1914)', 'Masquer les 243 expéditions punitives (1884–1914)')
+            : t('+ Show 243 punitive expeditions (1884–1914)', '+ 243 Strafexpeditionen einblenden (1884–1914)', '+ Afficher 243 expéditions punitives (1884–1914)')}
         </button>
       </div>
 
       {/* Floating HUD Top Right: Live Telemetry & Filter Info */}
-      <div style={{
-        position: 'absolute',
-        top: 14,
-        right: 14,
-        zIndex: 20,
-        backgroundColor: 'rgba(0, 0, 0, 0.90)',
-        border: '2px solid #FFFFFF',
-        boxShadow: '4px 4px 0px #DC2626',
-        padding: '8px 12px',
-        color: '#FFFFFF',
-        fontFamily: "'Space Mono', monospace",
-        fontSize: '9px',
-        maxWidth: '340px'
-      }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #334155', paddingBottom: '4px', marginBottom: '6px' }}>
-          <span style={{ fontWeight: 900, color: '#DC2626', letterSpacing: '0.5px' }}>
-            [GEODATEN-PROJEKTION AKTIV]
+      <div className="geo-hud-right">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.14)', paddingBottom: '5px', marginBottom: '7px', gap: '8px' }}>
+          <span style={{ fontWeight: 700, color: '#F7F6F2', fontSize: '11px' }}>
+            {t('Geospatial Projection', 'Geodaten-Projektion', 'Projection géospatiale')}
           </span>
-          <span style={{ fontSize: '8px', color: '#94A3B8' }}>
-            {loading ? 'LÄDT...' : 'ONLINE'}
+          <span className="mono" style={{ fontSize: '9.5px', color: loading ? '#FBBF24' : '#86EFAC', flexShrink: 0 }}>
+            {loading ? t('Loading…', 'Lädt…', 'Chargement…') : t('Live', 'Aktiv', 'Actif')}
           </span>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', fontSize: '9px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 10px', fontSize: '10.5px' }}>
           <div>
-            <span style={{ color: '#94A3B8' }}>Herkunftsorte:</span> <b>{filteredData.origins.length}</b>
+            <span style={{ color: '#A3A097' }}>{t('Origins:', 'Herkunft:', 'Origines :')}</span> <b className="mono">{filteredData.origins.length}</b>
           </div>
           <div>
-            <span style={{ color: '#94A3B8' }}>Ziel-Depots:</span> <b>{filteredData.depots.length}</b>
+            <span style={{ color: '#A3A097' }}>{t('Depots:', 'Depots:', 'Dépôts :')}</span> <b className="mono">{filteredData.depots.length}</b>
           </div>
           <div>
-            <span style={{ color: '#94A3B8' }}>Raub-Routen:</span> <b>{filteredData.routes.length}</b>
+            <span style={{ color: '#A3A097' }}>{t('Routes:', 'Routen:', 'Routes :')}</span> <b className="mono">{filteredData.routes.length}</b>
           </div>
           <div>
-            <span style={{ color: '#94A3B8' }}>Objekte:</span> <b style={{ color: '#DC2626' }}>{filteredData.routes.reduce((acc: number, r: any) => acc + r.object_count, 0).toLocaleString()}</b>
+            <span style={{ color: '#A3A097' }}>{t('Objects:', 'Objekte:', 'Objets :')}</span> <b className="mono" style={{ color: '#FCA5A5' }}>{filteredData.routes.reduce((acc: number, r: any) => acc + r.object_count, 0).toLocaleString()}</b>
           </div>
         </div>
         {activeMetricFilter && (
-          <div style={{ marginTop: '6px', borderTop: '1px solid #334155', paddingTop: '4px', fontSize: '8px', color: '#F59E0B' }}>
-            FILTER: [{activeMetricFilter.toUpperCase()}]
+          <div style={{ marginTop: '6px', borderTop: '1px solid rgba(255,255,255,0.14)', paddingTop: '5px', fontSize: '10px', color: '#FBBF24' }}>
+            {t('Filter:', 'Filter:', 'Filtre :')} {metricFilterLabel(activeMetricFilter, lang)}
           </div>
         )}
       </div>
 
       {/* Floating Bottom Legend */}
-      <div style={{
-        position: 'absolute',
-        bottom: 14,
-        left: 14,
-        zIndex: 20,
-        backgroundColor: 'rgba(0, 0, 0, 0.90)',
-        border: '2px solid #000000',
-        boxShadow: '3px 3px 0px #000000',
-        padding: '6px 12px',
-        display: 'flex',
-        gap: '12px',
-        alignItems: 'center',
-        flexWrap: 'wrap',
-        fontFamily: "'Space Mono', monospace",
-        fontSize: '9px',
-        color: '#FFFFFF'
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-          <span style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#DC2626', display: 'inline-block' }}></span>
-          <span>KAMERUN (HERKUNFT)</span>
+      <div className="geo-legend">
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#DC2626', display: 'inline-block' }}></span>
+          <span>{t('Cameroon (Origin)', 'Kamerun (Herkunft)', 'Cameroun (Origine)')}</span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-          <span style={{ width: '10px', height: '10px', backgroundColor: '#FFFFFF', border: '1px solid #000', display: 'inline-block' }}></span>
-          <span>DEPOT (EUROPA)</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <span style={{ width: '8px', height: '8px', backgroundColor: '#F7F6F2', border: '1px solid #141413', display: 'inline-block' }}></span>
+          <span>{t('Depot (Europe)', 'Depot (Europa)', 'Dépôt (Europe)')}</span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-          <span style={{ width: '16px', height: '3px', backgroundColor: '#DC2626', display: 'inline-block' }}></span>
-          <span>RAUB-VEKTOR</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <span style={{ width: '14px', height: '2px', backgroundColor: '#DC2626', display: 'inline-block' }}></span>
+          <span>{t('Loot Vector', 'Raub-Vektor', 'Vecteur de pillage')}</span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-          <span style={{ width: '16px', height: '3px', borderTop: '2px dashed #0891B2', display: 'inline-block' }}></span>
-          <span>VERDACHT (PROBABILISTISCH)</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <span style={{ width: '14px', height: '2px', borderTop: '2px dashed #38BDF8', display: 'inline-block' }}></span>
+          <span>{t('Suspicion', 'Verdacht', 'Soupçon')}</span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-          <span style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#CA8A04', display: 'inline-block' }}></span>
-          <span>DISSONANZ (DISPUTIERT)</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#CA8A04', display: 'inline-block' }}></span>
+          <span>{t('Dissonance', 'Dissonanz', 'Dissonance')}</span>
         </div>
         {showExpeditions && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-            <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#F59E0B', display: 'inline-block' }}></span>
-            <span>STRAFEXPEDITION (1884-1914)</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ width: '7px', height: '7px', borderRadius: '50%', backgroundColor: '#F59E0B', display: 'inline-block' }}></span>
+            <span>{t('Punitive Expedition (1884–1914)', 'Strafexpedition (1884–1914)', 'Expédition punitive (1884–1914)')}</span>
           </div>
         )}
       </div>

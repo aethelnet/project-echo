@@ -1,9 +1,11 @@
-
 import './staticSnapshotAdapter'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
+import { LangProvider } from './i18n.tsx'
 
 createRoot(document.getElementById('root')!).render(
-  <App />
+  <LangProvider>
+    <App />
+  </LangProvider>
 )
