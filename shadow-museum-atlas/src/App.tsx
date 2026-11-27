@@ -61,7 +61,6 @@ export default function App() {
   const projectImportInputRef = useRef<HTMLInputElement>(null);
   const [simCooldown, setSimCooldown] = useState<number>(0);
   const simActiveRef = useRef<boolean>(false);
-  const lastDragReheatRef = useRef<number>(0);
   
   // View Mode: 'graph' | 'map' | 'visual' | 'docs'
   const [viewMode, setViewMode] = useState<'graph' | 'map' | 'visual' | 'docs'>('graph');
@@ -430,21 +429,44 @@ export default function App() {
           setTimeout(() => {
             if (fgRef.current) {
               try {
+                // Disable global forceCenter(0,0) so dragging/pinning a node never shifts the rest of the atlas
+                fgRef.current.d3Force('center', null);
                 fgRef.current.d3Force('charge')?.strength((n: any) =>
-                  n.type === 'Institution' ? -260 : (n.type === 'Akteur' ? -130 : -30)
-                );
+                  n.type === 'Institution' ? -115 : (n.type === 'Akteur' ? -55 : -14)
+                )?.distanceMax(220);
                 fgRef.current.d3Force('link')?.distance((l: any) =>
                   l.type === 'LAGERT_IN' ? 85 : 68
-                )?.strength(0.42);
+                )?.strength(0.26);
                 // Gentle constellation spring keeps disconnected clusters tidy while letting connected neighbors move fluidly around pinned nodes
                 fgRef.current.d3Force('constellation', (alpha: number) => {
-                  const k = 0.025 * alpha;
+                  const k = 0.04 * Math.min(alpha, 0.28);
                   for (let i = 0; i < rawNodes.length; i++) {
                     const nd = rawNodes[i];
                     if (nd._pinned || nd.fx !== undefined) continue;
                     if (nd._homeX !== undefined && nd.x !== undefined) {
                       nd.vx = (nd.vx || 0) + (nd._homeX - nd.x) * k;
                       nd.vy = (nd.vy || 0) + (nd._homeY - nd.y) * k;
+                    }
+                  }
+                });
+                // Overdamped velocity cap prevents any sudden jump/hop on drag wake-up or dense cluster collisions
+                fgRef.current.d3Force('velClamp', () => {
+                  const maxV = 3.8;
+                  const maxV2 = maxV * maxV;
+                  for (let i = 0; i < rawNodes.length; i++) {
+                    const nd = rawNodes[i];
+                    if (nd._pinned || nd.fx !== undefined) {
+                      nd.vx = 0;
+                      nd.vy = 0;
+                      continue;
+                    }
+                    const vx = nd.vx || 0;
+                    const vy = nd.vy || 0;
+                    const v2 = vx * vx + vy * vy;
+                    if (v2 > maxV2) {
+                      const scale = maxV / Math.sqrt(v2);
+                      nd.vx = vx * scale;
+                      nd.vy = vy * scale;
                     }
                   }
                 });
@@ -1097,19 +1119,14 @@ export default function App() {
   const handleNodeDrag = useCallback((node: any) => {
     node.fx = node.x;
     node.fy = node.y;
+    node.vx = 0;
+    node.vy = 0;
     node._pinned = true;
+    // Let force-graph's built-in d3AlphaTarget(0.3) glide neighbors smoothly;
+    // never slam d3ReheatSimulation() (alpha = 1.0) repeatedly during drag.
     if (!simActiveRef.current) {
       simActiveRef.current = true;
-      setSimCooldown(240);
-    }
-    const now = performance.now();
-    if (now - lastDragReheatRef.current > 160) {
-      lastDragReheatRef.current = now;
-      requestAnimationFrame(() => {
-        try {
-          fgRef.current?.d3ReheatSimulation?.();
-        } catch (_e) {}
-      });
+      setSimCooldown(180);
     }
   }, []);
 
@@ -1118,19 +1135,18 @@ export default function App() {
     node._pinned = true;
     node.fx = node.x;
     node.fy = node.y;
+    node.vx = 0;
+    node.vy = 0;
     persistPinnedNode(id, node.x, node.y);
     setPinnedNodeIds((prev) => {
       const next = new Set(prev);
       next.add(id);
       return next;
     });
-    simActiveRef.current = true;
-    setSimCooldown(110);
-    requestAnimationFrame(() => {
-      try {
-        fgRef.current?.d3ReheatSimulation?.();
-      } catch (_e) {}
-    });
+    if (!simActiveRef.current) {
+      simActiveRef.current = true;
+      setSimCooldown(180);
+    }
   }, [persistPinnedNode]);
 
   const handlePinNodeAtCurrent = useCallback((node: any) => {
@@ -3495,8 +3511,8 @@ export default function App() {
               onNodeDrag={handleNodeDrag}
               onNodeDragEnd={handleNodeDragEnd}
               cooldownTicks={simCooldown}
-              d3AlphaDecay={0.04}
-              d3VelocityDecay={0.42}
+              d3AlphaDecay={0.055}
+              d3VelocityDecay={0.58}
             />
           </div>
           {viewMode === 'map' ? (
