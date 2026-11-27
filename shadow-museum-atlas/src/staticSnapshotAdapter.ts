@@ -12,6 +12,14 @@
 import { getStoredLang, trStatic, relLabel } from './i18n';
 import { analyzePhotoChainInBrowser } from './browserVisualForensics';
 import { parseSourceTextInBrowser } from './browserSourceParser';
+import {
+  getActiveProject,
+  updateActiveProject,
+  getResearcherProfile,
+  formatResearcherRoleLine,
+  setActivePinnedNode,
+  clearActivePinnedLayout,
+} from './workspaceStore';
 
 interface StaticBundle {
   generated_at: string;
@@ -54,11 +62,30 @@ export function isStaticSnapshotMode(): boolean {
   return backendState === 'static' || Boolean((window as any).__ECHO_STATIC_MODE__);
 }
 
-const LS_EDGES_KEY = 'echo_static_edges_v1';
-const LS_DELETED_EDGES_KEY = 'echo_static_deleted_edges_v1';
-const LS_ANNOTATIONS_KEY = 'echo_static_annotations_v1';
-const LS_CUSTOM_PUBS_KEY = 'echo_static_pubs_v1';
-const LS_DELETED_PUBS_KEY = 'echo_static_deleted_pubs_v1';
+function isStaticAuthenticated(init?: RequestInit): boolean {
+  if (localStorage.getItem('echo_researcher_token')) return true;
+  const hdrs: any = init?.headers;
+  if (hdrs && typeof hdrs === 'object') {
+    if (hdrs['X-Researcher-Key'] || hdrs['x-researcher-key']) return true;
+    if (typeof hdrs.get === 'function' && hdrs.get('X-Researcher-Key')) return true;
+  }
+  return false;
+}
+
+function requireStaticAuth(init?: RequestInit): Response | null {
+  if (isStaticAuthenticated(init)) return null;
+  return jsonResponse(
+    {
+      success: false,
+      detail: trStatic(
+        'Researcher workspace mode required for write actions.',
+        'Forscher-Modus für schreibende Aktionen erforderlich.',
+        "Mode chercheur requis pour les actions d'écriture.",
+      ),
+    },
+    401,
+  );
+}
 
 function jsonResponse(payload: any, status = 200): Response {
   return new Response(JSON.stringify(payload), {
@@ -130,23 +157,6 @@ function loadVisualDemo(): Promise<any> {
   return visualDemoPromise;
 }
 
-function readLocalJson<T>(key: string, fallback: T): T {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? (JSON.parse(raw) as T) : fallback;
-  } catch (_e) {
-    return fallback;
-  }
-}
-
-function writeLocalJson(key: string, val: any): void {
-  try {
-    localStorage.setItem(key, JSON.stringify(val));
-  } catch (_e) {
-    // Ignore storage quota errors
-  }
-}
-
 async function parseBody(init?: RequestInit): Promise<any> {
   if (!init || !init.body) return {};
   if (typeof init.body === 'string') {
@@ -165,6 +175,226 @@ function edgeSig(source: any, target: any, type: any): string {
   return `${s}::${String(type || '')}::${t}`;
 }
 
+function deterministicRingPos(id: string, type: string): { x: number; y: number } {
+  let h = 2166136261;
+  for (let i = 0; i < id.length; i++) {
+    h ^= id.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  const angle = ((h >>> 0) % 3600) * (Math.PI / 1800);
+  const r = type === 'Institution' ? 110 : type === 'Akteur' ? 210 : 300;
+  return { x: Math.round(Math.cos(angle) * r), y: Math.round(Math.sin(angle) * r) };
+}
+
+function buildEffectiveCorpus(bundle: StaticBundle) {
+  const project = getActiveProject();
+  const includeBase = project.includeBaseBundle;
+  const customEdges = project.edges || [];
+  const deletedEdgeSigs = new Set(project.deletedEdgeSigs || []);
+  const deletedPubIds = new Set(project.deletedPubIds || []);
+
+  const allNodesMap = new Map<string, any>();
+  if (includeBase) {
+    for (const n of bundle.graph.nodes) {
+      allNodesMap.set(String(n.id), { ...n });
+    }
+  }
+
+  for (const ce of customEdges) {
+    if (ce.source && !allNodesMap.has(String(ce.source))) {
+      const sType = ce.source_type || 'Subjekt';
+      const pos = deterministicRingPos(String(ce.source), sType);
+      allNodesMap.set(String(ce.source), {
+        id: String(ce.source),
+        label: ce.source_label || String(ce.source),
+        type: sType,
+        desc: ce.source_desc || trStatic('Case Node (Local Workspace)', 'Fall-Knoten (Lokales Projekt)', 'Nœud de dossier (Espace local)'),
+        contested: Boolean(ce.kollision),
+        x: pos.x,
+        y: pos.y,
+      });
+    }
+    if (ce.target && !allNodesMap.has(String(ce.target))) {
+      const tType = ce.target_type || 'Subjekt';
+      const pos = deterministicRingPos(String(ce.target), tType);
+      allNodesMap.set(String(ce.target), {
+        id: String(ce.target),
+        label: ce.target_label || String(ce.target),
+        type: tType,
+        desc: ce.target_desc || trStatic('Case Node (Local Workspace)', 'Fall-Knoten (Lokales Projekt)', 'Nœud de dossier (Espace local)'),
+        contested: Boolean(ce.kollision),
+        x: pos.x,
+        y: pos.y,
+      });
+    }
+  }
+
+  let links = [
+    ...(includeBase ? bundle.graph.links.map((l) => ({ ...l })) : []),
+    ...customEdges.map((l) => ({ ...l })),
+  ];
+
+  if (deletedEdgeSigs.size > 0) {
+    links = links.filter((l) => !deletedEdgeSigs.has(edgeSig(l.source, l.target, l.type)));
+  }
+  if (deletedPubIds.size > 0) {
+    links = links.filter((l) => !l.publikation || !deletedPubIds.has(String(l.publikation)));
+  }
+
+  // Flag contested objects dynamically across project edges (RAUBTE/ENTEIGNETE vs SCHENKTE/VERKAUFTE_AN)
+  const lootedSet = new Set<string>();
+  const donatedSet = new Set<string>();
+  for (const l of links) {
+    const s = String(typeof l.source === 'object' ? l.source.id : l.source);
+    const t = String(typeof l.target === 'object' ? l.target.id : l.target);
+    const ty = String(l.type || '');
+    if (ty === 'RAUBTE' || ty === 'ENTEIGNETE' || ty === 'EIGNETE_SICH_AN') {
+      lootedSet.add(s);
+      lootedSet.add(t);
+    }
+    if (ty === 'SCHENKTE' || ty === 'VERKAUFTE_AN' || ty === 'UEBERGAB_AN') {
+      donatedSet.add(s);
+      donatedSet.add(t);
+    }
+  }
+  for (const [id, n] of allNodesMap.entries()) {
+    if ((n.type === 'Subjekt' || n.type === 'Objekt') && lootedSet.has(id) && donatedSet.has(id)) {
+      n.contested = true;
+    }
+  }
+
+  const pubs = [
+    ...(includeBase ? bundle.publications?.publications || [] : []),
+    ...(project.publications || []),
+  ].filter((p) => !deletedPubIds.has(String(p.id)));
+
+  return { project, includeBase, allNodesMap, links, pubs };
+}
+
+function computeDynamicProjectAnalytics(bundle: StaticBundle) {
+  const { includeBase, allNodesMap, links, pubs } = buildEffectiveCorpus(bundle);
+  const usedIds = new Set<string>();
+  for (const l of links) {
+    usedIds.add(String(typeof l.source === 'object' ? l.source.id : l.source));
+    usedIds.add(String(typeof l.target === 'object' ? l.target.id : l.target));
+  }
+  const nodes = Array.from(usedIds).map((id) => allNodesMap.get(id)).filter(Boolean);
+
+  let subjekte = 0;
+  let akteure = 0;
+  let institutionen = 0;
+  for (const n of nodes) {
+    if (n.type === 'Akteur') akteure += 1;
+    else if (n.type === 'Institution') institutionen += 1;
+    else subjekte += 1;
+  }
+
+  let raub_kanten = 0;
+  let schenk_kanten = 0;
+  let verdacht_kanten = 0;
+  const actorCounts = new Map<string, { name: string; count: number; raub: number }>();
+  const depotCounts = new Map<string, { name: string; count: number; contested: number }>();
+  const edgesByObj = new Map<string, any[]>();
+
+  for (const l of links) {
+    const ty = String(l.type || '');
+    const s = String(typeof l.source === 'object' ? l.source.id : l.source);
+    const t = String(typeof l.target === 'object' ? l.target.id : l.target);
+    const sn = allNodesMap.get(s);
+    const tn = allNodesMap.get(t);
+    const isLoot = ty === 'RAUBTE' || ty === 'ENTEIGNETE' || ty === 'EIGNETE_SICH_AN';
+    const isGift = ty === 'SCHENKTE' || ty === 'VERKAUFTE_AN' || ty === 'UEBERGAB_AN';
+    if (isLoot) raub_kanten += 1;
+    if (isGift) schenk_kanten += 1;
+    if (ty === 'VERDACHT_AUF') verdacht_kanten += 1;
+
+    if (sn?.type === 'Akteur') {
+      const prev = actorCounts.get(s) || { name: sn.label || s, count: 0, raub: 0 };
+      prev.count += 1;
+      if (isLoot) prev.raub += 1;
+      actorCounts.set(s, prev);
+    }
+    if (tn?.type === 'Akteur') {
+      const prev = actorCounts.get(t) || { name: tn.label || t, count: 0, raub: 0 };
+      prev.count += 1;
+      if (isLoot) prev.raub += 1;
+      actorCounts.set(t, prev);
+    }
+    if (tn?.type === 'Institution') {
+      const prev = depotCounts.get(t) || { name: tn.label || t, count: 0, contested: 0 };
+      prev.count += 1;
+      if (sn?.contested) prev.contested += 1;
+      depotCounts.set(t, prev);
+    }
+
+    if (sn && (sn.type === 'Subjekt' || sn.type === 'Objekt')) {
+      const arr = edgesByObj.get(s) || [];
+      arr.push(l);
+      edgesByObj.set(s, arr);
+    }
+    if (tn && (tn.type === 'Subjekt' || tn.type === 'Objekt')) {
+      const arr = edgesByObj.get(t) || [];
+      arr.push(l);
+      edgesByObj.set(t, arr);
+    }
+  }
+
+  const contestedItems: any[] = [];
+  const gapItems: any[] = [];
+  const ghostItems: any[] = [];
+  for (const [objId, objEdges] of edgesByObj.entries()) {
+    const n = allNodesMap.get(objId);
+    const hasLoot = objEdges.some((e) => ['RAUBTE', 'ENTEIGNETE', 'EIGNETE_SICH_AN'].includes(e.type));
+    const hasGift = objEdges.some((e) => ['SCHENKTE', 'VERKAUFTE_AN', 'UEBERGAB_AN'].includes(e.type));
+    const hasDepot = objEdges.some((e) => e.type === 'LAGERT_IN');
+    if (hasLoot && hasGift) {
+      contestedItems.push({
+        id: objId,
+        label: n?.label || objId,
+        desc: n?.desc || '',
+        conflict_count: objEdges.length,
+        claims: objEdges.map((e) => ({ type: e.type, beleg: e.beleg || '', jahr: e.jahr || '' })),
+      });
+    }
+    if (hasDepot && !hasLoot && !hasGift) {
+      gapItems.push({ id: objId, label: n?.label || objId, desc: n?.desc || '' });
+    }
+    if (hasLoot && !hasDepot) {
+      ghostItems.push({ id: objId, label: n?.label || objId, desc: n?.desc || '' });
+    }
+  }
+
+  const actors = Array.from(actorCounts.values())
+    .sort((a, b) => b.count - a.count)
+    .map((a) => ({ id: a.name, name: a.name, edge_count: a.count, raub_count: a.raub }));
+  const institutions = Array.from(depotCounts.values())
+    .sort((a, b) => b.count - a.count)
+    .map((d) => ({ id: d.name, name: d.name, edge_count: d.count, contested_count: d.contested }));
+
+  return {
+    includeBase,
+    stats: {
+      success: true,
+      subjekte,
+      objekte: subjekte,
+      akteure,
+      institutionen,
+      publikationen: pubs.length,
+      raub_kanten,
+      schenk_kanten,
+      verdacht_kanten,
+      gesamt_kanten: links.length,
+      contested_objekte: contestedItems.length,
+      provenienz_luecken: gapItems.length,
+    },
+    entities: { success: true, actors, institutions },
+    contested: { success: true, total: contestedItems.length, items: contestedItems },
+    gaps: { success: true, total: gapItems.length, gap_ids: gapItems.map((g) => g.id), items: gapItems },
+    ghosts: { success: true, total: ghostItems.length, ghost_ids: ghostItems.map((g) => g.id), items: ghostItems },
+    suspicions: { success: true, total: 0, suspicions: [] },
+  };
+}
+
 function filterGraph(bundle: StaticBundle, params: URLSearchParams) {
   const limit = Math.max(1, Number(params.get('limit') || 8000));
   const pubsParam = params.get('publications');
@@ -178,49 +408,8 @@ function filterGraph(bundle: StaticBundle, params: URLSearchParams) {
     : null;
   const search = (params.get('search') || '').trim().toLowerCase();
 
-  const customEdges = readLocalJson<any[]>(LS_EDGES_KEY, []);
-  const deletedEdgeSigs = new Set(readLocalJson<string[]>(LS_DELETED_EDGES_KEY, []));
-  const deletedPubIds = new Set(readLocalJson<string[]>(LS_DELETED_PUBS_KEY, []));
-
-  const allNodesMap = new Map<string, any>();
-  for (const n of bundle.graph.nodes) {
-    allNodesMap.set(String(n.id), { ...n });
-  }
-
-  for (const ce of customEdges) {
-    if (ce.source && !allNodesMap.has(String(ce.source))) {
-      allNodesMap.set(String(ce.source), {
-        id: String(ce.source),
-        label: ce.source_label || String(ce.source),
-        type: ce.source_type || 'Subjekt',
-        desc: ce.source_desc || trStatic('Session Node (Browser)', 'Sitzungs-Knoten (Browser)', 'Nœud de session (Navigateur)'),
-        contested: Boolean(ce.kollision),
-        x: (Math.random() - 0.5) * 260,
-        y: (Math.random() - 0.5) * 260,
-      });
-    }
-    if (ce.target && !allNodesMap.has(String(ce.target))) {
-      allNodesMap.set(String(ce.target), {
-        id: String(ce.target),
-        label: ce.target_label || String(ce.target),
-        type: ce.target_type || 'Subjekt',
-        desc: ce.target_desc || trStatic('Session Node (Browser)', 'Sitzungs-Knoten (Browser)', 'Nœud de session (Navigateur)'),
-        contested: Boolean(ce.kollision),
-        x: (Math.random() - 0.5) * 260,
-        y: (Math.random() - 0.5) * 260,
-      });
-    }
-  }
-
-  let links = [...bundle.graph.links.map((l) => ({ ...l })), ...customEdges.map((l) => ({ ...l }))];
-
-  if (deletedEdgeSigs.size > 0) {
-    links = links.filter((l) => !deletedEdgeSigs.has(edgeSig(l.source, l.target, l.type)));
-  }
-
-  if (deletedPubIds.size > 0) {
-    links = links.filter((l) => !l.publikation || !deletedPubIds.has(String(l.publikation)));
-  }
+  const { allNodesMap, links: initialLinks } = buildEffectiveCorpus(bundle);
+  let links = initialLinks;
 
   if (allowedPubs && allowedPubs.size > 0) {
     links = links.filter((l) => {
@@ -278,9 +467,8 @@ function filterGraph(bundle: StaticBundle, params: URLSearchParams) {
 function buildDynamicEvidenceHtmlUrl(bundle: StaticBundle, invNumber: string): { url: string; filename: string } {
   const lang = getStoredLang();
   const tr = (en: string, de: string, fr: string) => trStatic(en, de, fr, lang);
-  const customEdges = readLocalJson<any[]>(LS_EDGES_KEY, []);
-  const allLinks = [...bundle.graph.links, ...customEdges];
-  const node = bundle.graph.nodes.find((n) => String(n.id) === invNumber || String(n.label) === invNumber);
+  const { allNodesMap, links: allLinks } = buildEffectiveCorpus(bundle);
+  const node = allNodesMap.get(invNumber) || Array.from(allNodesMap.values()).find((n) => String(n.label) === invNumber);
   const edges = allLinks.filter((l) => String(l.source) === invNumber || String(l.target) === invNumber);
 
   const edgeRows = edges
@@ -497,8 +685,10 @@ async function handleStaticApi(urlObj: URL, method: string, init?: RequestInit):
   }
 
   if (path === '/api/visual/commit_chain' && method === 'POST') {
+    const authErr = requireStaticAuth(init);
+    if (authErr) return authErr;
     const body = await parseBody(init);
-    const customEdges = readLocalJson<any[]>(LS_EDGES_KEY, []);
+    const prof = getResearcherProfile();
     const invId = body.inventarnummer || body.subject_id || '033513';
     const newEdge = {
       id: `vis_${Date.now()}`,
@@ -519,6 +709,7 @@ async function handleStaticApi(urlObj: URL, method: string, init?: RequestInit):
           `Chaîne photo RootSIFT+RANSAC (${body.inliers || 29} inliers, RMSE ${body.rmse_px || 0.78} px)`,
         ),
       publikation: 'visual_forensics_session',
+      created_by: prof.name || undefined,
       confidence: body.confidence || 0.96,
       begruendung:
         body.notes ||
@@ -528,65 +719,76 @@ async function handleStaticApi(urlObj: URL, method: string, init?: RequestInit):
           'Correspondance géométrique de surface vérifiée.',
         ),
     };
-    customEdges.push(newEdge);
-    writeLocalJson(LS_EDGES_KEY, customEdges);
+    updateActiveProject((p) => {
+      p.edges.push(newEdge);
+    });
     return jsonResponse({
       success: true,
       inventarnummer: invId,
       triples_committed: 1,
       edge: newEdge,
       message: trStatic(
-        'Visual evidence edge saved in local browser session.',
-        'Visuelle Beweiskante in der lokalen Browser-Sitzung gespeichert.',
-        'Arête de preuve visuelle enregistrée dans la session locale du navigateur.',
+        'Visual evidence edge saved in active project.',
+        'Visuelle Beweiskante im aktiven Projekt gespeichert.',
+        'Arête de preuve visuelle enregistrée dans le projet actif.',
       ),
     });
   }
 
   const bundle = await loadBundle();
+  const activeProj = getActiveProject();
 
   if (path === '/api/publications' && method === 'GET') {
-    const customPubs = readLocalJson<any[]>(LS_CUSTOM_PUBS_KEY, []);
-    const deletedPubs = new Set(readLocalJson<string[]>(LS_DELETED_PUBS_KEY, []));
-    const merged = [...(bundle.publications?.publications || []), ...customPubs].filter(
-      (p) => !deletedPubs.has(String(p.id)),
-    );
-    return jsonResponse({ success: true, publications: merged, total: merged.length });
+    const { pubs } = buildEffectiveCorpus(bundle);
+    return jsonResponse({ success: true, publications: pubs, total: pubs.length });
   }
 
   if (path.startsWith('/api/publications/') && method === 'DELETE') {
+    const authErr = requireStaticAuth(init);
+    if (authErr) return authErr;
     const pubId = decodeURIComponent(path.slice('/api/publications/'.length));
-    const customPubs = readLocalJson<any[]>(LS_CUSTOM_PUBS_KEY, []);
-    const remainingCustom = customPubs.filter((p) => String(p.id) !== pubId);
-    writeLocalJson(LS_CUSTOM_PUBS_KEY, remainingCustom);
-
-    const customEdges = readLocalJson<any[]>(LS_EDGES_KEY, []);
-    writeLocalJson(
-      LS_EDGES_KEY,
-      customEdges.filter((e) => String(e.publikation) !== pubId),
-    );
-
-    const deletedPubs = new Set(readLocalJson<string[]>(LS_DELETED_PUBS_KEY, []));
-    deletedPubs.add(pubId);
-    writeLocalJson(LS_DELETED_PUBS_KEY, Array.from(deletedPubs));
+    updateActiveProject((p) => {
+      p.publications = p.publications.filter((pub) => String(pub.id) !== pubId);
+      p.edges = p.edges.filter((e) => String(e.publikation) !== pubId);
+      if (!p.deletedPubIds.includes(pubId)) p.deletedPubIds.push(pubId);
+    });
 
     return jsonResponse({
       success: true,
       message: trStatic(
-        `Source '${pubId}' removed from local browser session.`,
-        `Quelle '${pubId}' aus der lokalen Browser-Sitzung entfernt.`,
-        `Source « ${pubId} » retirée de la session locale du navigateur.`,
+        `Source '${pubId}' removed from active project.`,
+        `Quelle '${pubId}' aus dem aktiven Projekt entfernt.`,
+        `Source « ${pubId} » retirée du projet actif.`,
       ),
     });
   }
 
-  if (path === '/api/filters/entities' && method === 'GET') return jsonResponse(bundle.filters_entities);
-  if (path === '/api/stats' && method === 'GET') return jsonResponse(bundle.stats);
-  if (path === '/api/ghosts' && method === 'GET') return jsonResponse(bundle.ghosts);
-  if (path === '/api/contested' && method === 'GET') return jsonResponse(bundle.contested);
-  if (path === '/api/gaps' && method === 'GET') return jsonResponse(bundle.gaps);
-  if (path === '/api/suspicions' && method === 'GET') return jsonResponse(bundle.suspicions);
-  if (path === '/api/geodata' && method === 'GET') return jsonResponse(bundle.geodata);
+  if (!activeProj.includeBaseBundle) {
+    const dyn = computeDynamicProjectAnalytics(bundle);
+    if (path === '/api/filters/entities' && method === 'GET') return jsonResponse(dyn.entities);
+    if (path === '/api/stats' && method === 'GET') return jsonResponse(dyn.stats);
+    if (path === '/api/ghosts' && method === 'GET') return jsonResponse(dyn.ghosts);
+    if (path === '/api/contested' && method === 'GET') return jsonResponse(dyn.contested);
+    if (path === '/api/gaps' && method === 'GET') return jsonResponse(dyn.gaps);
+    if (path === '/api/suspicions' && method === 'GET') return jsonResponse(dyn.suspicions);
+    if (path === '/api/geodata' && method === 'GET') return jsonResponse({ success: true, routes: [], locations: [], events: [] });
+  } else {
+    const hasCustomDeltas =
+      (activeProj.edges?.length || 0) > 0 ||
+      (activeProj.publications?.length || 0) > 0 ||
+      (activeProj.deletedEdgeSigs?.length || 0) > 0 ||
+      (activeProj.deletedPubIds?.length || 0) > 0;
+    if (hasCustomDeltas && path === '/api/stats' && method === 'GET') {
+      return jsonResponse(computeDynamicProjectAnalytics(bundle).stats);
+    }
+    if (path === '/api/filters/entities' && method === 'GET') return jsonResponse(bundle.filters_entities);
+    if (path === '/api/stats' && method === 'GET') return jsonResponse(bundle.stats);
+    if (path === '/api/ghosts' && method === 'GET') return jsonResponse(bundle.ghosts);
+    if (path === '/api/contested' && method === 'GET') return jsonResponse(bundle.contested);
+    if (path === '/api/gaps' && method === 'GET') return jsonResponse(bundle.gaps);
+    if (path === '/api/suspicions' && method === 'GET') return jsonResponse(bundle.suspicions);
+    if (path === '/api/geodata' && method === 'GET') return jsonResponse(bundle.geodata);
+  }
 
   if (path === '/api/graph' && method === 'GET') {
     return jsonResponse(filterGraph(bundle, urlObj.searchParams));
@@ -595,8 +797,7 @@ async function handleStaticApi(urlObj: URL, method: string, init?: RequestInit):
   if (path.startsWith('/api/actors/') && path.endsWith('/summary')) {
     const rawName = decodeURIComponent(path.slice('/api/actors/'.length, -'/summary'.length));
     const found =
-      bundle.actor_summaries[rawName] ||
-      bundle.actor_summaries[rawName.toLowerCase()] || {
+      (activeProj.includeBaseBundle && (bundle.actor_summaries[rawName] || bundle.actor_summaries[rawName.toLowerCase()])) || {
         success: true,
         summary: {
           name: rawName,
@@ -615,8 +816,7 @@ async function handleStaticApi(urlObj: URL, method: string, init?: RequestInit):
   if (path.startsWith('/api/institutions/') && path.endsWith('/summary')) {
     const rawName = decodeURIComponent(path.slice('/api/institutions/'.length, -'/summary'.length));
     const found =
-      bundle.institution_summaries[rawName] ||
-      bundle.institution_summaries[rawName.toLowerCase()] || {
+      (activeProj.includeBaseBundle && (bundle.institution_summaries[rawName] || bundle.institution_summaries[rawName.toLowerCase()])) || {
         success: true,
         summary: {
           name: rawName,
@@ -632,25 +832,34 @@ async function handleStaticApi(urlObj: URL, method: string, init?: RequestInit):
 
   if (path === '/api/graph/layout') {
     if (method === 'DELETE') {
-      localStorage.removeItem('echo_guest_layout');
+      clearActivePinnedLayout();
       return jsonResponse({ success: true, reset: true });
     }
     const body = await parseBody(init);
     if (body && body.positions) {
-      const existing = readLocalJson<Record<string, any>>('echo_guest_layout', {});
-      writeLocalJson('echo_guest_layout', { ...existing, ...body.positions });
+      updateActiveProject((p) => {
+        p.pinnedLayout = { ...p.pinnedLayout, ...body.positions };
+      });
     } else if (body && body.id && typeof body.x === 'number' && typeof body.y === 'number') {
-      const existing = readLocalJson<Record<string, any>>('echo_guest_layout', {});
-      existing[body.id] = { x: body.x, y: body.y };
-      writeLocalJson('echo_guest_layout', existing);
+      setActivePinnedNode(body.id, body.x, body.y);
+    } else if (body && typeof body === 'object') {
+      updateActiveProject((p) => {
+        for (const [k, v] of Object.entries(body)) {
+          if (v && typeof (v as any).x === 'number' && typeof (v as any).y === 'number') {
+            p.pinnedLayout[k] = { x: (v as any).x, y: (v as any).y };
+          }
+        }
+      });
     }
     return jsonResponse({ success: true });
   }
 
   if (path === '/api/graph/edges') {
+    const authErr = requireStaticAuth(init);
+    if (authErr) return authErr;
     const body = await parseBody(init);
-    const customEdges = readLocalJson<any[]>(LS_EDGES_KEY, []);
     if (method === 'POST') {
+      const prof = getResearcherProfile();
       const edge = {
         id: `edge_${Date.now()}`,
         source: body.source_id || body.source,
@@ -658,10 +867,13 @@ async function handleStaticApi(urlObj: URL, method: string, init?: RequestInit):
         type: body.rel_type || body.type,
         beleg: body.props?.beleg || body.beleg,
         publikation: body.props?.publikation || body.publikation || 'manual_session',
+        created_by: body.props?.created_by || prof.name || undefined,
+        created_role: body.props?.created_role || formatResearcherRoleLine(prof),
         ...body,
       };
-      customEdges.push(edge);
-      writeLocalJson(LS_EDGES_KEY, customEdges);
+      updateActiveProject((p) => {
+        p.edges.push(edge);
+      });
       return jsonResponse({ success: true, edge });
     }
     if (method === 'DELETE') {
@@ -669,47 +881,52 @@ async function handleStaticApi(urlObj: URL, method: string, init?: RequestInit):
       const t = body.target_id || body.target;
       const r = body.rel_type || body.type;
       const sig = edgeSig(s, t, r);
-      const filtered = customEdges.filter((e) => edgeSig(e.source, e.target, e.type) !== sig);
-      writeLocalJson(LS_EDGES_KEY, filtered);
-      const deletedSigs = new Set(readLocalJson<string[]>(LS_DELETED_EDGES_KEY, []));
-      deletedSigs.add(sig);
-      writeLocalJson(LS_DELETED_EDGES_KEY, Array.from(deletedSigs));
+      updateActiveProject((p) => {
+        p.edges = p.edges.filter((e) => edgeSig(e.source, e.target, e.type) !== sig);
+        if (!p.deletedEdgeSigs.includes(sig)) p.deletedEdgeSigs.push(sig);
+      });
       return jsonResponse({ success: true });
     }
   }
 
   if (path.startsWith('/api/objects/') && path.endsWith('/annotations')) {
     const objId = decodeURIComponent(path.slice('/api/objects/'.length, -'/annotations'.length));
-    const store = readLocalJson<Record<string, any[]>>(LS_ANNOTATIONS_KEY, {});
     if (method === 'GET') {
+      const store = activeProj.annotations || {};
       return jsonResponse({ success: true, annotations: store[objId] || [] });
     }
     if (method === 'POST') {
+      const authErr = requireStaticAuth(init);
+      if (authErr) return authErr;
       const body = await parseBody(init);
+      const prof = getResearcherProfile();
       const annId = `ann_${Date.now()}`;
       const entry = {
         id: annId,
         object_id: objId,
-        author: body.author || trStatic('Guest Researcher', 'Gast-ForscherIn', 'Chercheur invité'),
-        role: body.role || trStatic('Provenance Research', 'Provenienzforschung', 'Recherche de provenance'),
+        author: body.author || prof.name || trStatic('Researcher', 'Forschung', 'Chercheur·se'),
+        role: body.role || formatResearcherRoleLine(prof),
         tags: body.tags || [],
         notes: body.notes || '',
         confidence: body.confidence ?? 'HIGH',
         created_at: new Date().toISOString(),
       };
-      store[objId] = [entry, ...(store[objId] || [])];
-      writeLocalJson(LS_ANNOTATIONS_KEY, store);
+      updateActiveProject((p) => {
+        p.annotations[objId] = [entry, ...(p.annotations[objId] || [])];
+      });
       return jsonResponse({ success: true, annotation_id: annId, annotation: entry });
     }
   }
 
   if (path.startsWith('/api/annotations/') && method === 'DELETE') {
+    const authErr = requireStaticAuth(init);
+    if (authErr) return authErr;
     const annId = decodeURIComponent(path.slice('/api/annotations/'.length));
-    const store = readLocalJson<Record<string, any[]>>(LS_ANNOTATIONS_KEY, {});
-    for (const k of Object.keys(store)) {
-      store[k] = (store[k] || []).filter((a) => a.id !== annId);
-    }
-    writeLocalJson(LS_ANNOTATIONS_KEY, store);
+    updateActiveProject((p) => {
+      for (const k of Object.keys(p.annotations)) {
+        p.annotations[k] = (p.annotations[k] || []).filter((a) => a.id !== annId);
+      }
+    });
     return jsonResponse({ success: true });
   }
 
@@ -789,6 +1006,8 @@ async function handleStaticApi(urlObj: URL, method: string, init?: RequestInit):
   }
 
   if (path === '/api/sources/upload' && method === 'POST') {
+    const authErr = requireStaticAuth(init);
+    if (authErr) return authErr;
     let filename = 'Browser_Excerpt.txt';
     let rawText = '';
 
@@ -829,25 +1048,23 @@ async function handleStaticApi(urlObj: URL, method: string, init?: RequestInit):
       publikation: pubId,
     }));
 
-    const existingEdges = readLocalJson<any[]>(LS_EDGES_KEY, []);
-    writeLocalJson(LS_EDGES_KEY, [...existingEdges, ...newEdges]);
-
-    const customPubs = readLocalJson<any[]>(LS_CUSTOM_PUBS_KEY, []);
-    customPubs.unshift({
-      id: pubId,
-      name: filename,
-      kuerzel,
-      typ: trStatic('Browser Session Ingestion', 'Browser-Sitzung (Ingestion)', 'Ingestion locale (Navigateur)'),
-      jahr: new Date().getFullYear(),
-      beschreibung: trStatic(
-        `Extracted ${newEdges.length} provenance relations (${parsed.inventories.length} objects, ${parsed.collisions} collisions).`,
-        `${newEdges.length} Provenienz-Relationen extrahiert (${parsed.inventories.length} Objekte, ${parsed.collisions} Kollisionen).`,
-        `${newEdges.length} relations de provenance extraites (${parsed.inventories.length} objets, ${parsed.collisions} collisions).`,
-      ),
-      edge_count: newEdges.length,
-      source_text: rawText,
+    updateActiveProject((p) => {
+      p.edges.push(...newEdges);
+      p.publications.unshift({
+        id: pubId,
+        name: filename,
+        kuerzel,
+        typ: trStatic('Browser Session Ingestion', 'Browser-Sitzung (Ingestion)', 'Ingestion locale (Navigateur)'),
+        jahr: new Date().getFullYear(),
+        beschreibung: trStatic(
+          `Extracted ${newEdges.length} provenance relations (${parsed.inventories.length} objects, ${parsed.collisions} collisions).`,
+          `${newEdges.length} Provenienz-Relationen extrahiert (${parsed.inventories.length} Objekte, ${parsed.collisions} Kollisionen).`,
+          `${newEdges.length} relations de provenance extraites (${parsed.inventories.length} objets, ${parsed.collisions} collisions).`,
+        ),
+        edge_count: newEdges.length,
+        source_text: rawText,
+      });
     });
-    writeLocalJson(LS_CUSTOM_PUBS_KEY, customPubs);
 
     return jsonResponse({
       success: true,

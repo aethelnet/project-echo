@@ -6,6 +6,27 @@ import VisualForensicsView from './VisualForensicsView';
 import DocumentsView from './DocumentsView';
 import { isStaticSnapshotMode } from './staticSnapshotAdapter';
 import { useLang, relLabel, nodeTypeLabel, localizePoiDesc } from './i18n';
+import {
+  DEFAULT_PROJECT_ID,
+  type EchoProject,
+  type ResearcherProfile,
+  listProjects,
+  getActiveProject,
+  setActiveProjectId,
+  createProject,
+  deleteProject,
+  updateActiveProject,
+  exportProjectPayload,
+  importProjectAsNew,
+  mergeProjectAsLayer,
+  getResearcherProfile,
+  saveResearcherProfile,
+  formatResearcherRoleLine,
+  getActivePinnedLayout,
+  setActivePinnedNode,
+  removeActivePinnedNode,
+  clearActivePinnedLayout,
+} from './workspaceStore';
 
 type MetricFilter = null | 'subjekte' | 'raub' | 'schenkung' | 'dissonanz' | 'verdacht' | 'akteure' | 'depots' | 'luecken';
 
@@ -27,13 +48,17 @@ export default function App() {
   const [searchTerm, setSearchTerm] = useState('');
   const deferredSearchTerm = useDeferredValue(searchTerm);
   const [pinnedNodeIds, setPinnedNodeIds] = useState<Set<string>>(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem('echo_guest_layout') || '{}');
-      return new Set(Object.keys(saved));
-    } catch (_e) {
-      return new Set();
-    }
+    return new Set(Object.keys(getActivePinnedLayout()));
   });
+  const [projects, setProjects] = useState<EchoProject[]>(() => listProjects());
+  const [activeProject, setActiveProject] = useState<EchoProject>(() => getActiveProject());
+  const [showProjectsModal, setShowProjectsModal] = useState<boolean>(false);
+  const [newProjName, setNewProjName] = useState<string>('');
+  const [newProjDesc, setNewProjDesc] = useState<string>('');
+  const [newProjIncludeBase, setNewProjIncludeBase] = useState<boolean>(false);
+  const [projectStatusMsg, setProjectStatusMsg] = useState<string | null>(null);
+  const [importMode, setImportMode] = useState<'new' | 'merge'>('new');
+  const projectImportInputRef = useRef<HTMLInputElement>(null);
   const [simCooldown, setSimCooldown] = useState<number>(0);
   const simActiveRef = useRef<boolean>(false);
   const lastDragReheatRef = useRef<number>(0);
@@ -126,17 +151,9 @@ export default function App() {
   const [sidebarSearch, setSidebarSearch] = useState('');
   const [exclusiveCypherMode, setExclusiveCypherMode] = useState(false);
 
-  // Researcher Case Watchlist (Pinned POIs / Leitobjekte)
+  // Researcher Case Watchlist (Pinned POIs / Leitobjekte — scoped per active project)
   const [pinnedPois, setPinnedPois] = useState<Array<{ id: string; label: string; desc: string }>>(() => {
-    try {
-      const raw = localStorage.getItem('echo_pinned_pois');
-      if (raw) return JSON.parse(raw);
-    } catch (_e) {}
-    return [
-      { id: 'Ngonnso (Ahnenfigur der Nso)', label: 'Ngonnso (Ahnenfigur der Nso)', desc: 'Sakrale weibliche Ahnenfigur der Nso' },
-      { id: 'Mandu Yenu (Königsthron)', label: 'Mandu Yenu (Königsthron)', desc: 'Perlenbesetzter Königsthron von Bamum' },
-      { id: 'III C 15017', label: 'III C 15017', desc: 'Schlitztrommel aus Banssa / Bafut (1902)' }
-    ];
+    return getActiveProject().pinnedPois || [];
   });
 
   const togglePinPoi = useCallback((nodeObj: { id: string; label?: string; desc?: string }) => {
@@ -145,18 +162,21 @@ export default function App() {
       const next = exists
         ? prev.filter(p => p.id !== nodeObj.id)
         : [{ id: nodeObj.id, label: nodeObj.label || nodeObj.id, desc: nodeObj.desc || t('Key Restitution Object', 'Fokus-Leitobjekt', 'Objet phare de restitution') }, ...prev];
-      try {
-        localStorage.setItem('echo_pinned_pois', JSON.stringify(next));
-      } catch (_e) {}
+      updateActiveProject((p) => { p.pinnedPois = next; });
       return next;
     });
   }, [t]);
 
-  // User Annotations State (Marianne / Richard Kuration)
+  // Local Researcher Identity & Curation State (Zero hardcoded demo authors)
+  const [researcherProfile, setResearcherProfile] = useState<ResearcherProfile>(() => getResearcherProfile());
+  const [profileNameInput, setProfileNameInput] = useState<string>(() => getResearcherProfile().name);
+  const [profileRoleInput, setProfileRoleInput] = useState<string>(() => getResearcherProfile().role);
+  const [profileInstInput, setProfileInstInput] = useState<string>(() => getResearcherProfile().institution);
+
   const [annotations, setAnnotations] = useState<any[]>([]);
   const [isLoadingAnnotations, setIsLoadingAnnotations] = useState(false);
-  const [annAuthor, setAnnAuthor] = useState('Marianne');
-  const [annRole, setAnnRole] = useState('Provenance Lead');
+  const [annAuthor, setAnnAuthor] = useState(() => getResearcherProfile().name);
+  const [annRole, setAnnRole] = useState(() => formatResearcherRoleLine(getResearcherProfile()));
   const [annTags, setAnnTags] = useState('');
   const [annNotes, setAnnNotes] = useState('');
   const [annConfidence, setAnnConfidence] = useState('HIGH');
@@ -172,6 +192,17 @@ export default function App() {
   const [loginError, setLoginError] = useState<string | null>(null);
   const [isLoggingIn, setIsLoggingIn] = useState<boolean>(false);
 
+  const applySavedProfile = useCallback((name: string, role: string, institution: string) => {
+    const saved = saveResearcherProfile({ name, role, institution });
+    setResearcherProfile(saved);
+    setProfileNameInput(saved.name);
+    setProfileRoleInput(saved.role);
+    setProfileInstInput(saved.institution);
+    setAnnAuthor(saved.name);
+    setAnnRole(formatResearcherRoleLine(saved));
+    return saved;
+  }, []);
+
   const getAuthHeaders = useCallback(() => {
     const token = localStorage.getItem('echo_researcher_token');
     return token ? { 'X-Researcher-Key': token } : {};
@@ -182,10 +213,11 @@ export default function App() {
     setLoginError(null);
     setIsLoggingIn(true);
     try {
+      const prof = applySavedProfile(profileNameInput, profileRoleInput, profileInstInput);
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: 'marianne', password: loginPassword })
+        body: JSON.stringify({ username: prof.name || 'researcher', password: loginPassword })
       });
       const data = await res.json();
       if (res.ok && data.success) {
@@ -209,6 +241,7 @@ export default function App() {
   };
 
   const handleSandboxLogin = () => {
+    applySavedProfile(profileNameInput, profileRoleInput, profileInstInput);
     localStorage.setItem('echo_researcher_token', 'echo-static-sandbox');
     setIsResearcher(true);
     setShowLoginModal(false);
@@ -367,10 +400,7 @@ export default function App() {
 
           const rawNodes = data.nodes || [];
           const nextPinned = new Set<string>();
-          let guestLayout: Record<string, any> = {};
-          try {
-            guestLayout = JSON.parse(localStorage.getItem('echo_guest_layout') || '{}');
-          } catch (_e) {}
+          const guestLayout: Record<string, any> = getActivePinnedLayout();
 
           rawNodes.forEach((n: any) => {
             n._labelLower = n.label ? String(n.label).toLowerCase() : '';
@@ -513,33 +543,14 @@ export default function App() {
     return () => observer.disconnect();
   }, [sidebarOpen, selectedNode, selectedLink]);
 
-  // 3. Stats & Initial Mount
-  useEffect(() => {
-    fetch('/api/stats')
-      .then(res => res.json())
-      .then(data => {
-        if (data.success) {
-          setStats({
-            subjekte: data.subjekte || data.objekte || 0,
-            akteure: data.akteure || 0,
-            institutionen: data.institutionen || 0,
-            publikationen: data.publikationen || 0,
-            raub_kanten: data.raub_kanten || 0,
-            schenk_kanten: data.schenk_kanten || 0,
-            verdacht_kanten: data.verdacht_kanten || 0,
-            gesamt_kanten: data.gesamt_kanten || 0,
-            contested_objekte: data.contested_objekte || 0,
-            provenienz_luecken: data.provenienz_luecken || 0
-          });
-        }
-      })
-      .catch(err => console.error("Stats Fetch Error:", err));
-
+  const loadAnalyticalOverlays = useCallback(() => {
     fetch('/api/ghosts')
       .then(res => res.json())
       .then(data => {
         if (data.success && data.ghost_ids) {
           setGhostIds(new Set(data.ghost_ids));
+        } else {
+          setGhostIds(new Set());
         }
       })
       .catch(err => console.error("Ghost Fetch Error:", err));
@@ -556,22 +567,26 @@ export default function App() {
           }
           setContestedIds(ids);
           setContestedMap(mapping);
+        } else {
+          setContestedIds(new Set());
+          setContestedMap({});
         }
       })
       .catch(err => console.error("Contested Fetch Error:", err));
 
-    // Provenienzlücken laden
     fetch('/api/gaps')
       .then(res => res.json())
       .then(data => {
         if (data.success && data.items) {
           setGapIds(new Set(data.gap_ids || []));
           setGapItems(data.items || []);
+        } else {
+          setGapIds(new Set());
+          setGapItems([]);
         }
       })
       .catch(err => console.error("Gaps Fetch Error:", err));
 
-    // Autonomous Provenance Suspicions laden
     fetch('/api/suspicions')
       .then(res => res.json())
       .then(data => {
@@ -585,10 +600,54 @@ export default function App() {
           }
           setSuspicionMap(mapping);
           setSuspicionIds(ids);
+        } else {
+          setSuspicions([]);
+          setSuspicionMap({});
+          setSuspicionIds(new Set());
         }
       })
       .catch(err => console.error("Suspicions Fetch Error:", err));
+  }, []);
 
+  const reloadActiveWorkspace = useCallback(() => {
+    const cur = getActiveProject();
+    setProjects(listProjects());
+    setActiveProject(cur);
+    setPinnedPois(cur.pinnedPois || []);
+    setPinnedNodeIds(new Set(Object.keys(cur.pinnedLayout || {})));
+    setSelectedNode(null);
+    setSelectedLink(null);
+    setFocusedEntity(null);
+    setFocusedSummary(null);
+    setActiveMetricFilter(null);
+    setGhostMode(false);
+    setSelectedPubs(new Set());
+    loadStats();
+    loadAnalyticalOverlays();
+    loadFilterEntities();
+    fetch('/api/publications')
+      .then(res => res.json())
+      .then(data => {
+        if (data.success && Array.isArray(data.publications)) {
+          setPublications(data.publications);
+          const nextPubs = new Set<string>(data.publications.map((p: any) => p.id));
+          setSelectedPubs(nextPubs);
+          loadGraph(nextPubs);
+        } else {
+          setPublications([]);
+          loadGraph(new Set());
+        }
+      })
+      .catch(() => {
+        setPublications([]);
+        loadGraph(new Set());
+      });
+  }, [loadStats, loadAnalyticalOverlays, loadFilterEntities, loadGraph]);
+
+  // 3. Stats & Initial Mount
+  useEffect(() => {
+    loadStats();
+    loadAnalyticalOverlays();
     loadPublications();
     loadFilterEntities();
 
@@ -606,7 +665,7 @@ export default function App() {
         })
         .catch(() => {});
     }
-  }, [loadPublications, loadFilterEntities]);
+  }, [loadStats, loadAnalyticalOverlays, loadPublications, loadFilterEntities]);
 
   useEffect(() => {
     if (publications.length > 0) {
@@ -630,7 +689,7 @@ export default function App() {
       .then(async res => {
         if (res.status === 401) {
           setShowLoginModal(true);
-          setLoginError(t('Researcher authorization required.', 'Forscher-Autorisierung erforderlich (Marianne).', 'Autorisation chercheur requise.'));
+          setLoginError(t('Researcher authorization required.', 'Forscher-Autorisierung erforderlich.', 'Autorisation chercheur requise.'));
           return;
         }
         const data = await res.json();
@@ -1024,11 +1083,7 @@ export default function App() {
   }, []);
 
   const persistPinnedNode = useCallback((nodeId: string, x: number, y: number) => {
-    try {
-      const guestLayout = JSON.parse(localStorage.getItem('echo_guest_layout') || '{}');
-      guestLayout[nodeId] = { x, y };
-      localStorage.setItem('echo_guest_layout', JSON.stringify(guestLayout));
-    } catch (_e) {}
+    setActivePinnedNode(nodeId, x, y);
 
     if (localStorage.getItem('echo_researcher_token')) {
       fetch('/api/graph/layout', {
@@ -1099,11 +1154,7 @@ export default function App() {
     target._pinned = false;
     target.fx = undefined;
     target.fy = undefined;
-    try {
-      const guestLayout = JSON.parse(localStorage.getItem('echo_guest_layout') || '{}');
-      delete guestLayout[target.id];
-      localStorage.setItem('echo_guest_layout', JSON.stringify(guestLayout));
-    } catch (_e) {}
+    removeActivePinnedNode(target.id);
     setPinnedNodeIds((prev) => {
       const next = new Set(prev);
       next.delete(target.id);
@@ -1124,7 +1175,7 @@ export default function App() {
       n.fx = undefined;
       n.fy = undefined;
     });
-    localStorage.removeItem('echo_guest_layout');
+    clearActivePinnedLayout();
     setPinnedNodeIds(new Set());
     simActiveRef.current = true;
     setSimCooldown(95);
@@ -1158,7 +1209,7 @@ export default function App() {
         n.vy = 0;
       }
     });
-    localStorage.removeItem('echo_guest_layout');
+    clearActivePinnedLayout();
     setPinnedNodeIds(new Set());
     simActiveRef.current = false;
     setSimCooldown(0);
@@ -1190,18 +1241,24 @@ export default function App() {
         source_id: selectedNode.id,
         target_id: newEdgeTarget,
         rel_type: newEdgeType,
-        props: { beleg: newEdgeBeleg, publikation: 'MANUELLE_INSPEKTION' }
+        props: {
+          beleg: newEdgeBeleg,
+          publikation: 'MANUELLE_INSPEKTION',
+          created_by: researcherProfile.name || undefined,
+          created_role: formatResearcherRoleLine(researcherProfile),
+        }
       })
     }).then(async r => {
        if (r.status === 401) {
          setShowLoginModal(true);
-         setLoginError(t('Researcher authorization required.', 'Forscher-Autorisierung erforderlich (Marianne).', 'Autorisation chercheur requise.'));
+         setLoginError(t('Researcher authorization required.', 'Forscher-Autorisierung erforderlich.', 'Autorisation chercheur requise.'));
          return;
        }
        if (r.ok) {
          setNewEdgeTarget('');
          setNewEdgeBeleg('');
          loadStats();
+         loadAnalyticalOverlays();
          loadFilterEntities();
          loadGraph();
        }
@@ -1232,7 +1289,7 @@ export default function App() {
     }).then(async r => {
       if (r.status === 401) {
         setShowLoginModal(true);
-        setLoginError(t('Researcher authorization required.', 'Forscher-Autorisierung erforderlich (Marianne).', 'Autorisation chercheur requise.'));
+        setLoginError(t('Researcher authorization required.', 'Forscher-Autorisierung erforderlich.', 'Autorisation chercheur requise.'));
         return;
       }
       if (r.ok) {
@@ -1269,7 +1326,7 @@ export default function App() {
       .then(async res => {
         if (res.status === 401) {
           setShowLoginModal(true);
-          setLoginError(t('Researcher authorization required.', 'Forscher-Autorisierung erforderlich (Marianne).', 'Autorisation chercheur requise.'));
+          setLoginError(t('Researcher authorization required.', 'Forscher-Autorisierung erforderlich.', 'Autorisation chercheur requise.'));
           setUploadMessage(t('[401: AUTHORIZATION REQUIRED]', '[401: AUTORISIERUNG ERFORDERLICH]', '[401 : AUTORISATION REQUISE]'));
           setIsUploading(false);
           return null;
@@ -1349,7 +1406,7 @@ export default function App() {
       });
   };
 
-  // 7.5 User Annotations Engine (Marianne / Richard)
+  // 7.5 User Annotations Engine (Local Researcher Profile)
   useEffect(() => {
     if (selectedNode && (selectedNode.type === 'Subjekt' || selectedNode.type === 'Objekt')) {
       setIsLoadingAnnotations(true);
@@ -1379,12 +1436,14 @@ export default function App() {
     setAnnStatusMsg(null);
     try {
       const tagList = annTags.split(',').map(t => t.trim()).filter(t => t.length > 0);
+      const effectiveAuthor = annAuthor.trim() || researcherProfile.name || t('Researcher', 'Forschung', 'Chercheur·se');
+      const effectiveRole = annRole.trim() || formatResearcherRoleLine(researcherProfile);
       const res = await fetch(`/api/objects/${encodeURIComponent(selectedNode.id)}/annotations`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({
-          author: annAuthor,
-          role: annRole,
+          author: effectiveAuthor,
+          role: effectiveRole,
           tags: tagList,
           notes: annNotes,
           confidence: annConfidence
@@ -1399,8 +1458,8 @@ export default function App() {
       if (data.success) {
         const newAnn = {
           id: data.annotation_id,
-          author: annAuthor,
-          role: annRole,
+          author: effectiveAuthor,
+          role: effectiveRole,
           tags: tagList,
           notes: annNotes,
           confidence: annConfidence,
@@ -1430,7 +1489,7 @@ export default function App() {
       });
       if (res.status === 401) {
         setShowLoginModal(true);
-        setLoginError(t('Researcher authorization required.', 'Forscher-Autorisierung erforderlich (Marianne).', 'Autorisation chercheur requise.'));
+        setLoginError(t('Researcher authorization required.', 'Forscher-Autorisierung erforderlich.', 'Autorisation chercheur requise.'));
         return;
       }
       const data = await res.json();
@@ -2074,7 +2133,39 @@ export default function App() {
                 </button>
               </div>
 
-              {/* Dual-Mode Auth Badge */}
+              {/* Project / Case Workspace Switcher */}
+              <button
+                type="button"
+                data-testid="project-switcher-btn"
+                onClick={() => {
+                  setProjects(listProjects());
+                  setActiveProject(getActiveProject());
+                  setProjectStatusMsg(null);
+                  setShowProjectsModal(true);
+                }}
+                title={t(
+                  'Switch provenance case, create an empty project, or export/import .echo.json',
+                  'Fallakte / Projekt wechseln, leeres Projekt anlegen oder .echo.json exportieren/importieren',
+                  'Changer de dossier, créer un projet vide ou exporter/importer .echo.json'
+                )}
+                className="archival-btn"
+                style={{
+                  padding: '4px 9px',
+                  fontSize: '10.5px',
+                  maxWidth: '175px',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  borderColor: activeProject.id !== DEFAULT_PROJECT_ID ? '#155E75' : '#D8D5CD',
+                  color: activeProject.id !== DEFAULT_PROJECT_ID ? '#155E75' : '#141413',
+                  backgroundColor: activeProject.id !== DEFAULT_PROJECT_ID ? '#F0F9FF' : '#FFFFFF',
+                }}
+              >
+                <span style={{ fontWeight: 700 }}>{t('Case:', 'Projekt:', 'Dossier :')}</span>{' '}
+                <span>{activeProject.id === DEFAULT_PROJECT_ID ? t('Cameroon Atlas', 'Kamerun-Atlas', 'Atlas Cameroun') : activeProject.name}</span>
+              </button>
+
+              {/* Dual-Mode Auth & Local Researcher Identity Badge */}
               {isResearcher ? (
                 <div style={{
                   display: 'flex',
@@ -2085,12 +2176,30 @@ export default function App() {
                   padding: '3px 8px',
                   borderRadius: '2px'
                 }}>
-                  <span style={{ fontSize: '10.5px', fontWeight: 600, color: '#166534' }}>
-                    {t('● Researcher', '● Forscher-Modus', '● Chercheur')}
-                  </span>
+                  <button
+                    type="button"
+                    data-testid="researcher-profile-btn"
+                    onClick={() => { setShowLoginModal(true); setLoginError(null); }}
+                    title={t('Edit your researcher name, role & institution', 'Eigenes Forscher-Profil (Name, Rolle & Institution) bearbeiten', 'Modifier votre profil chercheur')}
+                    style={{
+                      border: 'none',
+                      background: 'none',
+                      padding: 0,
+                      fontSize: '10.5px',
+                      fontWeight: 600,
+                      color: '#166534',
+                      cursor: 'pointer',
+                      maxWidth: '140px',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap'
+                    }}
+                  >
+                    ● {researcherProfile.name || t('Researcher', 'Forscher-Modus', 'Chercheur')}
+                  </button>
                   <button
                     onClick={handleLogout}
-                    title={t('Sign out and switch to guest mode', 'Ausloggen und in Gast-Modus wechseln', 'Se déconnecter et passer en mode invité')}
+                    title={t('Sign out and switch to read-only guest mode', 'Ausloggen und in schreibgeschützten Gast-Modus wechseln', 'Se déconnecter et passer en lecture seule')}
                     style={{
                       padding: '2px 6px',
                       fontSize: '10px',
@@ -2106,13 +2215,15 @@ export default function App() {
                 </div>
               ) : (
                 <button
+                  type="button"
+                  data-testid="header-login-btn"
                   onClick={() => { setShowLoginModal(true); setLoginError(null); }}
-                  title={t('Enable researcher or browser sandbox write access', 'Forscher- oder Browser-Sandbox-Modus aktivieren', "Activer le mode chercheur ou bac à sable local")}
+                  title={t('Set researcher profile & unlock local or server editing', 'Forscher-Profil setzen & Bearbeitungsmodus aktivieren', 'Définir le profil chercheur et activer l’édition')}
                   className="archival-btn"
                   style={{ padding: '4px 9px', fontSize: '10.5px' }}
                 >
                   <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#78766F', display: 'inline-block' }} />
-                  {t('Researcher Mode', 'Forscher-Login', 'Mode Chercheur')}
+                  {t('Researcher Mode', 'Forscher-Profil', 'Mode Chercheur')}
                 </button>
               )}
 
@@ -2501,22 +2612,33 @@ export default function App() {
                 )}
               </div>
 
-              {/* Dual-Mode Auth & Actions */}
+              {/* Dual-Mode Auth, Projects & Actions */}
               <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
+                <button
+                  type="button"
+                  onClick={() => { setProjects(listProjects()); setActiveProject(getActiveProject()); setProjectStatusMsg(null); setShowProjectsModal(true); setMobileMenuOpen(false); }}
+                  className="archival-btn"
+                  style={{ padding: '4px 8px', fontSize: '10px' }}
+                >
+                  {t('Case:', 'Projekt:', 'Dossier :')} {activeProject.id === DEFAULT_PROJECT_ID ? t('Cameroon Atlas', 'Kamerun-Atlas', 'Atlas Cameroun') : activeProject.name}
+                </button>
                 {isResearcher ? (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', border: '1.5px solid #16A34A', backgroundColor: '#F0FDF4', padding: '3px 6px' }}>
-                    <span style={{ fontSize: '8px', fontWeight: 900, color: '#16A34A' }}>{t('● RESEARCHER', '● MARIANNE', '● CHERCHEUR')}</span>
-                    <button onClick={handleLogout} style={{ padding: '2px 5px', fontSize: '8px', fontWeight: 'bold', backgroundColor: '#000000', color: '#FFFFFF', border: 'none', cursor: 'pointer' }}>{t('LOGOUT', 'LOGOUT', 'SORTIR')}</button>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', border: '1px solid #86EFAC', backgroundColor: '#F0FDF4', padding: '3px 7px', borderRadius: '2px' }}>
+                    <span style={{ fontSize: '10px', fontWeight: 600, color: '#166534' }}>● {researcherProfile.name || t('Researcher', 'Forschung', 'Chercheur')}</span>
+                    <button onClick={handleLogout} className="archival-btn" style={{ padding: '2px 6px', fontSize: '9.5px' }}>{t('Sign out', 'Logout', 'Sortir')}</button>
                   </div>
                 ) : (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', border: '1.5px solid #64748B', backgroundColor: '#FFFFFF', padding: '3px 6px' }}>
-                    <span style={{ fontSize: '8px', fontWeight: 900, color: '#475569' }}>{t('○ GUEST', '○ GAST', '○ INVITÉ')}</span>
-                    <button onClick={() => { setShowLoginModal(true); setLoginError(null); setMobileMenuOpen(false); }} style={{ padding: '2px 5px', fontSize: '8px', fontWeight: 'bold', backgroundColor: '#000000', color: '#FFFFFF', border: 'none', cursor: 'pointer' }}>{t('LOGIN', 'LOGIN', 'CONNEXION')}</button>
-                  </div>
+                  <button
+                    onClick={() => { setShowLoginModal(true); setLoginError(null); setMobileMenuOpen(false); }}
+                    className="archival-btn"
+                    style={{ padding: '4px 8px', fontSize: '10px' }}
+                  >
+                    ○ {t('Researcher Mode', 'Forscher-Profil', 'Mode Chercheur')}
+                  </button>
                 )}
                 <div style={{ display: 'flex', gap: '4px' }}>
-                  <button onClick={() => { handleResetLayout(); setMobileMenuOpen(false); }} style={{ padding: '4px 6px', backgroundColor: '#000000', color: '#FFFFFF', border: '1.5px solid #000000', fontSize: '8px', fontWeight: 'bold', cursor: 'pointer' }}>[RESET]</button>
-                  <button onClick={() => { fgRef.current?.zoomToFit(600, 40); setMobileMenuOpen(false); }} style={{ padding: '4px 6px', backgroundColor: '#FFFFFF', border: '1.5px solid #000000', fontSize: '8px', fontWeight: 'bold', cursor: 'pointer' }}>[ZOOM]</button>
+                  <button onClick={() => { handleResetLayout(); setMobileMenuOpen(false); }} className="archival-btn" style={{ padding: '4px 7px', fontSize: '10px' }}>{t('Reset', 'Reset', 'Réinit.')}</button>
+                  <button onClick={() => { fgRef.current?.zoomToFit(600, 40); setMobileMenuOpen(false); }} className="archival-btn" style={{ padding: '4px 7px', fontSize: '10px' }}>{t('Fit', 'Zoom', 'Ajuster')}</button>
                 </div>
               </div>
 
@@ -3283,7 +3405,76 @@ export default function App() {
           }}
         >
           {/* Keep ForceGraph2D mounted across tab switches for instant 0ms resume */}
-          <div className="graph-canvas-wrap" style={{ display: viewMode === 'graph' ? 'block' : 'none', width: '100%', height: '100%' }}>
+          <div className="graph-canvas-wrap" style={{ display: viewMode === 'graph' ? 'block' : 'none', width: '100%', height: '100%', position: 'relative' }}>
+            {!loading && graphData.nodes.length === 0 && (
+              <div
+                data-testid="empty-case-overlay"
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  zIndex: 15,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: '24px',
+                  backgroundColor: 'rgba(251, 251, 249, 0.94)',
+                }}
+              >
+                <div style={{
+                  maxWidth: '460px',
+                  width: '100%',
+                  backgroundColor: '#FFFFFF',
+                  border: '1px solid #D8D5CD',
+                  borderTop: '3px solid #155E75',
+                  padding: '22px 24px',
+                  borderRadius: '2px',
+                  boxShadow: '0 8px 24px rgba(20,20,19,0.06)',
+                }}>
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.06em', color: '#155E75', marginBottom: '6px' }}>
+                    {t('Empty Provenance Case', 'Leeres Provenienz-Projekt', 'Dossier de provenance vide')}
+                  </div>
+                  <h2 style={{ fontFamily: 'var(--font-serif)', fontSize: '20px', fontWeight: 700, margin: '0 0 8px', color: '#141413' }}>
+                    {activeProject.name}
+                  </h2>
+                  <p style={{ fontSize: '12.5px', color: '#52514C', lineHeight: 1.55, margin: '0 0 16px' }}>
+                    {activeProject.description || t(
+                      'This workspace starts completely clean. Ingest archival texts or CSV inventories in the Documents tab, upload a photo chain in Visual Forensics, or import an .echo.json layer.',
+                      'Dieses Projekt startet komplett leer. Lade Archivtexte oder CSV-Inventare im Dokumente-Tab hoch, prüfe Fotoketten in der Bildforensik oder importiere eine .echo.json-Schicht.',
+                      'Cet espace démarre vide. Importez des textes d’archives dans Documents, analysez des chaînes photo dans Forensique visuelle ou importez un fichier .echo.json.'
+                    )}
+                  </p>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <button
+                      type="button"
+                      data-testid="empty-case-open-docs-btn"
+                      onClick={() => setViewMode('docs')}
+                      className="archival-btn archival-btn-primary"
+                      style={{ padding: '9px 14px', fontSize: '12px', justifyContent: 'center' }}
+                    >
+                      {t('Open Documents to ingest archival sources', 'Dokumente öffnen & Quellen einlesen', 'Ouvrir Documents pour importer des sources')}
+                    </button>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                      <button
+                        type="button"
+                        onClick={() => { setShowProjectsModal(true); setProjectStatusMsg(null); }}
+                        className="archival-btn"
+                        style={{ padding: '7px 10px', fontSize: '11px', justifyContent: 'center' }}
+                      >
+                        {t('Import .echo.json', '.echo.json laden', 'Importer .echo.json')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setActiveProjectId(DEFAULT_PROJECT_ID); reloadActiveWorkspace(); }}
+                        className="archival-btn"
+                        style={{ padding: '7px 10px', fontSize: '11px', justifyContent: 'center' }}
+                      >
+                        {t('Back to Cameroon Atlas', 'Zum Kamerun-Atlas', 'Retour à l’Atlas')}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
             <ForceGraph2D
               ref={fgRef}
               width={canvasDimensions.width}
@@ -3887,44 +4078,57 @@ export default function App() {
                       )}
 
                       {/* Neuer Eintrag Formular */}
-                      <div style={{
-                        borderTop: '1px dashed #A7F3D0',
-                        paddingTop: '8px',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: '6px'
-                      }}>
-                        <div style={{ fontSize: '9px', fontWeight: 'bold', color: '#064E3B' }}>
-                          {t('ADD NEW ANNOTATION:', 'NEUE ANNOTATION HINZUFÜGEN:', 'AJOUTER UNE ANNOTATION :')}
-                        </div>
-
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
-                          <div>
-                            <label style={{ fontSize: '8px', color: '#065F46', fontWeight: 'bold' }}>{t('AUTHOR:', 'AUTOR:', 'AUTEUR :')}</label>
-                            <select
-                              value={annAuthor}
-                              onChange={e => {
-                                setAnnAuthor(e.target.value);
-                                if (e.target.value === 'Marianne') setAnnRole('Provenance Lead');
-                                else if (e.target.value === 'Richard') setAnnRole(t('Project Lead', 'Projektleitung', 'Direction de projet'));
-                                else if (e.target.value === 'Stud. Hilfskraft') setAnnRole(t('Research Team', 'Recherche-Team', 'Équipe de recherche'));
-                                else setAnnRole(t('Guest Researcher', 'Gastforscher', 'Chercheur invité'));
-                              }}
-                              style={{
-                                width: '100%',
-                                fontSize: '9px',
-                                padding: '3px 4px',
-                                border: '1px solid #059669',
-                                backgroundColor: '#FFFFFF',
-                                fontWeight: 'bold'
-                              }}
-                            >
-                              <option value="Marianne">Marianne (Provenance Lead)</option>
-                              <option value="Richard">{t('Richard (Project Lead)', 'Richard (Projektleitung)', 'Richard (Direction de projet)')}</option>
-                              <option value="Stud. Hilfskraft">{t('Research Assistant', 'Stud. Hilfskraft', 'Assistant·e de recherche')}</option>
-                              <option value="Gastforscher">{t('Guest Researcher / Delegation', 'Gastforscher / Delegation', 'Chercheur invité / Délégation')}</option>
-                            </select>
+                      {isResearcher ? (
+                        <div style={{
+                          borderTop: '1px dashed #A7F3D0',
+                          paddingTop: '8px',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '6px'
+                        }}>
+                          <div style={{ fontSize: '9px', fontWeight: 'bold', color: '#064E3B' }}>
+                            {t('ADD NEW ANNOTATION:', 'NEUE ANNOTATION HINZUFÜGEN:', 'AJOUTER UNE ANNOTATION :')}
                           </div>
+
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+                            <div>
+                              <label style={{ fontSize: '8px', color: '#065F46', fontWeight: 'bold' }}>{t('AUTHOR:', 'AUTOR:', 'AUTEUR :')}</label>
+                              <input
+                                type="text"
+                                data-testid="curation-author-input"
+                                value={annAuthor}
+                                onChange={e => setAnnAuthor(e.target.value)}
+                                placeholder={t('Your name…', 'Dein Name…', 'Votre nom…')}
+                                style={{
+                                  width: '100%',
+                                  boxSizing: 'border-box',
+                                  fontSize: '9.5px',
+                                  padding: '4px 6px',
+                                  border: '1px solid #059669',
+                                  backgroundColor: '#FFFFFF',
+                                  fontWeight: 600
+                                }}
+                              />
+                            </div>
+                            <div>
+                              <label style={{ fontSize: '8px', color: '#065F46', fontWeight: 'bold' }}>{t('ROLE / INSTITUTION:', 'ROLLE / INSTITUTION:', 'RÔLE / INSTITUTION :')}</label>
+                              <input
+                                type="text"
+                                value={annRole}
+                                onChange={e => setAnnRole(e.target.value)}
+                                placeholder={t('e.g. Provenance Research', 'z. B. Provenienzforschung', 'ex. Recherche de provenance')}
+                                style={{
+                                  width: '100%',
+                                  boxSizing: 'border-box',
+                                  fontSize: '9.5px',
+                                  padding: '4px 6px',
+                                  border: '1px solid #059669',
+                                  backgroundColor: '#FFFFFF'
+                                }}
+                              />
+                            </div>
+                          </div>
+
                           <div>
                             <label style={{ fontSize: '8px', color: '#065F46', fontWeight: 'bold' }}>{t('CONFIDENCE:', 'KONFIDENZ:', 'CONFIANCE :')}</label>
                             <select
@@ -3932,8 +4136,8 @@ export default function App() {
                               onChange={e => setAnnConfidence(e.target.value)}
                               style={{
                                 width: '100%',
-                                fontSize: '9px',
-                                padding: '3px 4px',
+                                fontSize: '9.5px',
+                                padding: '4px 6px',
                                 border: '1px solid #059669',
                                 backgroundColor: '#FFFFFF'
                               }}
@@ -3943,83 +4147,98 @@ export default function App() {
                               <option value="LOW">{t('HYPOTHESIS (LOW)', 'HYPOTHESE (LOW)', 'HYPOTHÈSE (FAIBLE)')}</option>
                             </select>
                           </div>
-                        </div>
 
-                        <div>
-                          <label style={{ fontSize: '8px', color: '#065F46', fontWeight: 'bold' }}>{t('TAGS (COMMA-SEPARATED):', 'TAGS (KOMMAGETRENNT):', 'MOTS-CLÉS (SÉPARÉS PAR VIRGULES) :')}</label>
-                          <input
-                            type="text"
-                            placeholder={t('e.g. Glauning 1906, Bamum, Looted', 'z.B. Glauning 1906, Bamum, Beutegut', 'ex. Glauning 1906, Bamoun, Butin')}
-                            value={annTags}
-                            onChange={e => setAnnTags(e.target.value)}
-                            style={{
-                              width: '100%',
-                              boxSizing: 'border-box',
-                              fontSize: '9px',
-                              padding: '4px',
-                              border: '1px solid #059669',
-                              backgroundColor: '#FFFFFF'
-                            }}
-                          />
-                        </div>
-
-                        <div>
-                          <label style={{ fontSize: '8px', color: '#065F46', fontWeight: 'bold' }}>{t('RESEARCH NOTE / LEGAL SUBSUMPTION:', 'FORSCHUNGSNOTIZ / SUBSUMTION:', 'NOTE DE RECHERCHE / QUALIFICATION JURIDIQUE :')}</label>
-                          <textarea
-                            rows={3}
-                            placeholder={t(
-                              'Enter forensic note, archive reference, witness statement, or curation...',
-                              'Forensische Notiz, Archivbeleg, Zeugenbericht oder Kuration eintragen...',
-                              "Saisir une note forensique, référence d'archive, témoignage ou curation..."
-                            )}
-                            value={annNotes}
-                            onChange={e => setAnnNotes(e.target.value)}
-                            style={{
-                              width: '100%',
-                              boxSizing: 'border-box',
-                              fontSize: '9px',
-                              padding: '4px',
-                              border: '1px solid #059669',
-                              backgroundColor: '#FFFFFF',
-                              fontFamily: 'inherit'
-                            }}
-                          />
-                        </div>
-
-                        <button
-                          onClick={handleSaveAnnotation}
-                          disabled={isSubmittingAnn || !annNotes.trim()}
-                          style={{
-                            backgroundColor: !annNotes.trim() ? '#A3A097' : '#166534',
-                            color: '#FFFFFF',
-                            border: 'none',
-                            borderRadius: '2px',
-                            padding: '7px 12px',
-                            fontWeight: 600,
-                            fontSize: '11px',
-                            cursor: (!annNotes.trim() || isSubmittingAnn) ? 'not-allowed' : 'pointer',
-                            marginTop: '4px'
-                          }}
-                        >
-                          {isSubmittingAnn
-                            ? t('Saving annotation…', 'Speichere Annotation…', 'Enregistrement…')
-                            : t('Save annotation to graph', 'Annotation im Graphen speichern', "Enregistrer l'annotation dans le graphe")}
-                        </button>
-
-                        {annStatusMsg && (
-                          <div style={{ fontSize: '8.5px', color: '#065F46', fontWeight: 'bold', textAlign: 'center', marginTop: '2px' }}>
-                            {annStatusMsg}
+                          <div>
+                            <label style={{ fontSize: '8px', color: '#065F46', fontWeight: 'bold' }}>{t('TAGS (COMMA-SEPARATED):', 'TAGS (KOMMAGETRENNT):', 'MOTS-CLÉS (SÉPARÉS PAR VIRGULES) :')}</label>
+                            <input
+                              type="text"
+                              placeholder={t('e.g. Glauning 1906, Bamum, Looted', 'z.B. Glauning 1906, Bamum, Beutegut', 'ex. Glauning 1906, Bamoun, Butin')}
+                              value={annTags}
+                              onChange={e => setAnnTags(e.target.value)}
+                              style={{
+                                width: '100%',
+                                boxSizing: 'border-box',
+                                fontSize: '9.5px',
+                                padding: '4px 6px',
+                                border: '1px solid #059669',
+                                backgroundColor: '#FFFFFF'
+                              }}
+                            />
                           </div>
-                        )}
-                      </div>
+
+                          <div>
+                            <label style={{ fontSize: '8px', color: '#065F46', fontWeight: 'bold' }}>{t('RESEARCH NOTE / LEGAL SUBSUMPTION:', 'FORSCHUNGSNOTIZ / SUBSUMTION:', 'NOTE DE RECHERCHE / QUALIFICATION JURIDIQUE :')}</label>
+                            <textarea
+                              rows={3}
+                              placeholder={t(
+                                'Enter forensic note, archive reference, witness statement, or curation...',
+                                'Forensische Notiz, Archivbeleg, Zeugenbericht oder Kuration eintragen...',
+                                "Saisir une note forensique, référence d'archive, témoignage ou curation..."
+                              )}
+                              value={annNotes}
+                              onChange={e => setAnnNotes(e.target.value)}
+                              style={{
+                                width: '100%',
+                                boxSizing: 'border-box',
+                                fontSize: '9.5px',
+                                padding: '4px 6px',
+                                border: '1px solid #059669',
+                                backgroundColor: '#FFFFFF',
+                                fontFamily: 'inherit'
+                              }}
+                            />
+                          </div>
+
+                          <button
+                            onClick={handleSaveAnnotation}
+                            disabled={isSubmittingAnn || !annNotes.trim()}
+                            style={{
+                              backgroundColor: !annNotes.trim() ? '#A3A097' : '#166534',
+                              color: '#FFFFFF',
+                              border: 'none',
+                              borderRadius: '2px',
+                              padding: '7px 12px',
+                              fontWeight: 600,
+                              fontSize: '11px',
+                              cursor: (!annNotes.trim() || isSubmittingAnn) ? 'not-allowed' : 'pointer',
+                              marginTop: '4px'
+                            }}
+                          >
+                            {isSubmittingAnn
+                              ? t('Saving annotation…', 'Speichere Annotation…', 'Enregistrement…')
+                              : t('Save annotation to graph', 'Annotation im Graphen speichern', "Enregistrer l'annotation dans le graphe")}
+                          </button>
+
+                          {annStatusMsg && (
+                            <div style={{ fontSize: '8.5px', color: '#065F46', fontWeight: 'bold', textAlign: 'center', marginTop: '2px' }}>
+                              {annStatusMsg}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div style={{ borderTop: '1px dashed #A7F3D0', paddingTop: '8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
+                          <span style={{ fontSize: '10.5px', color: '#065F46' }}>
+                            {t('Read-only guest view.', 'Schreibgeschützte Gast-Ansicht.', 'Mode lecture seule.')}
+                          </span>
+                          <button
+                            type="button"
+                            data-testid="unlock-from-inspector-btn"
+                            onClick={() => { setShowLoginModal(true); setLoginError(null); }}
+                            className="archival-btn"
+                            style={{ padding: '4px 9px', fontSize: '10px', borderColor: '#166534', color: '#166534' }}
+                          >
+                            {t('Unlock Researcher Profile', 'Forscher-Profil aktivieren', 'Activer le profil chercheur')}
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
 
                 
-                {/* MANUELLE RELATION */}
-                {(selectedNodeDetails && (selectedNodeDetails.type === 'Subjekt' || selectedNodeDetails.type === 'Objekt' || selectedNodeDetails.type === 'Institution' || selectedNodeDetails.type === 'Akteur')) && (
-                  <div style={{ marginTop: '14px', border: '1px solid #D8D5CD', borderLeft: '3px solid #991B1B', padding: '12px', backgroundColor: '#F7F6F2' }}>
+                {/* MANUELLE RELATION (Researcher Mode only — never exposed as broken write form to guests) */}
+                {(isResearcher && selectedNodeDetails && (selectedNodeDetails.type === 'Subjekt' || selectedNodeDetails.type === 'Objekt' || selectedNodeDetails.type === 'Institution' || selectedNodeDetails.type === 'Akteur')) && (
+                  <div data-testid="manual-relation-panel" style={{ marginTop: '14px', border: '1px solid #D8D5CD', borderLeft: '3px solid #991B1B', padding: '12px', backgroundColor: '#F7F6F2' }}>
                     <div style={{ fontSize: '11px', fontWeight: 700, color: '#991B1B', marginBottom: '8px' }}>
                       {t('+ Link Manual Relation', '+ Manuelle Relation verknüpfen', '+ Lier une relation manuelle')}
                     </div>
@@ -4703,7 +4922,7 @@ export default function App() {
           </aside>
         )}
 
-      {/* Archival Researcher Authorization Modal */}
+      {/* Archival Researcher Identity & Authorization Modal */}
       {showLoginModal && (
         <div style={{
           position: 'fixed',
@@ -4721,13 +4940,13 @@ export default function App() {
             borderRadius: '2px',
             boxShadow: '0 20px 50px rgba(20,20,19,0.24)',
             width: '92%',
-            maxWidth: '450px',
+            maxWidth: '470px',
             padding: '24px',
-            fontFamily: "'Inter', sans-serif"
+            fontFamily: 'var(--font-sans)'
           }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', borderBottom: '1px solid #D8D5CD', paddingBottom: '10px' }}>
-              <div style={{ fontSize: '14px', fontWeight: 700, color: '#141413' }}>
-                {t('Researcher Authorization', 'Forscher-Autorisierung', 'Autorisation chercheur')}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', borderBottom: '1px solid #D8D5CD', paddingBottom: '10px' }}>
+              <div style={{ fontFamily: 'var(--font-serif)', fontSize: '16px', fontWeight: 700, color: '#141413' }}>
+                {t('Researcher Profile & Workspace Access', 'Forscher-Profil & Arbeitsmodus', 'Profil chercheur & accès édition')}
               </div>
               <button
                 onClick={() => { setShowLoginModal(false); setLoginError(null); }}
@@ -4739,24 +4958,70 @@ export default function App() {
             </div>
 
             <p style={{ fontSize: '12px', color: '#52514C', lineHeight: 1.55, marginBottom: '14px', marginTop: 0 }}>
-              {lang === 'de' ? (
-                <>
-                  Im <strong>Gast-Modus</strong> sind alle Analysen, Graph-Erkundungen, Filter und Dossiers frei verfügbar. Schreibende Aktionen (Kanten anlegen/löschen, Quellen-Ingestionen, Annotationen) erfordern den Forscher-Modus.
-                </>
-              ) : lang === 'fr' ? (
-                <>
-                  En <strong>mode invité</strong>, toutes les analyses, explorations du graphe, filtres et dossiers sont librement accessibles. Les actions d'écriture (arêtes, ingestions, annotations) nécessitent le mode chercheur.
-                </>
-              ) : (
-                <>
-                  In <strong>Guest Mode</strong>, all analyses, graph explorations, filters, and dossiers are freely available. Mutating actions (creating/deleting edges, source ingestions, annotations) require researcher mode.
-                </>
+              {t(
+                'Zero-account local-first identity (GDPR-safe): your name and role are stored only in your browser and stamped onto your annotations, manual links, and exported .echo.json project files.',
+                'Lokale Identität ohne Account-Zwang (DSGVO-konform): Dein Name und deine Rolle bleiben rein im Browser und erscheinen auf deinen Annotationen, manuellen Kanten und exportierten .echo.json-Projekten.',
+                'Identité locale sans compte (conforme RGPD) : votre nom et votre rôle restent dans votre navigateur et signent vos annotations, liens manuels et fichiers .echo.json.'
               )}
             </p>
 
-            {isStaticSnapshotMode() && (
+            {/* Local Researcher Profile Fields */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '14px', padding: '12px', backgroundColor: '#F7F6F2', border: '1px solid #D8D5CD' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '10.5px', fontWeight: 600, marginBottom: '4px', color: '#3F3E3A' }}>
+                  {t('Researcher Name / Initials', 'Name / Kürzel', 'Nom / Initiales')}
+                </label>
+                <input
+                  type="text"
+                  data-testid="profile-name-input"
+                  value={profileNameInput}
+                  onChange={(e) => setProfileNameInput(e.target.value)}
+                  placeholder={t('e.g. Dr. A. Mensah', 'z. B. Dr. A. Mensah', 'ex. Dr A. Mensah')}
+                  style={{ width: '100%', padding: '7px 9px', border: '1px solid #D8D5CD', borderRadius: '2px', fontSize: '12px', boxSizing: 'border-box', backgroundColor: '#FFFFFF' }}
+                />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '10.5px', fontWeight: 600, marginBottom: '4px', color: '#3F3E3A' }}>
+                    {t('Role', 'Rolle', 'Rôle')}
+                  </label>
+                  <input
+                    type="text"
+                    data-testid="profile-role-input"
+                    value={profileRoleInput}
+                    onChange={(e) => setProfileRoleInput(e.target.value)}
+                    placeholder={t('Provenance Research', 'Provenienzforschung', 'Recherche de provenance')}
+                    style={{ width: '100%', padding: '7px 9px', border: '1px solid #D8D5CD', borderRadius: '2px', fontSize: '12px', boxSizing: 'border-box', backgroundColor: '#FFFFFF' }}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '10.5px', fontWeight: 600, marginBottom: '4px', color: '#3F3E3A' }}>
+                    {t('Institution / Delegation (opt.)', 'Institution / Delegation (opt.)', 'Institution / Délégation (opt.)')}
+                  </label>
+                  <input
+                    type="text"
+                    value={profileInstInput}
+                    onChange={(e) => setProfileInstInput(e.target.value)}
+                    placeholder={t('Optional', 'Optional', 'Facultatif')}
+                    style={{ width: '100%', padding: '7px 9px', border: '1px solid #D8D5CD', borderRadius: '2px', fontSize: '12px', boxSizing: 'border-box', backgroundColor: '#FFFFFF' }}
+                  />
+                </div>
+              </div>
+              {isResearcher && (
+                <button
+                  type="button"
+                  onClick={() => { applySavedProfile(profileNameInput, profileRoleInput, profileInstInput); setShowLoginModal(false); }}
+                  className="archival-btn archival-btn-primary"
+                  style={{ padding: '7px 12px', fontSize: '11.5px', justifyContent: 'center', marginTop: '2px' }}
+                >
+                  {t('Save Profile', 'Profil speichern', 'Enregistrer le profil')}
+                </button>
+              )}
+            </div>
+
+            {isStaticSnapshotMode() && !isResearcher && (
               <div style={{
-                marginBottom: '16px',
+                marginBottom: '14px',
                 padding: '12px 14px',
                 backgroundColor: '#F0FDF4',
                 border: '1px solid #86EFAC',
@@ -4765,16 +5030,16 @@ export default function App() {
               }}>
                 <div style={{ fontSize: '11.5px', fontWeight: 700, color: '#166534', marginBottom: '4px' }}>
                   {t(
-                    'Public Browser Sandbox — No Password Required',
-                    'Öffentliche Browser-Sandbox — Kein Passwort nötig',
-                    'Bac à sable navigateur public — Sans mot de passe'
+                    'Local Browser Workspace — No Server Password Needed',
+                    'Lokaler Browser-Arbeitsmodus — Kein Server-Passwort nötig',
+                    'Espace navigateur local — Aucun mot de passe requis'
                   )}
                 </div>
                 <div style={{ fontSize: '11px', color: '#166534', lineHeight: 1.5, marginBottom: '10px', opacity: 0.9 }}>
                   {t(
-                    'All source ingestions, photo-chain commits, annotations, and edge edits are saved privately in your browser (localStorage) without modifying the shared server.',
-                    'Alle Quellen-Ingestionen, Foto-Ketten-Commits, Annotationen und Kanten-Änderungen werden privat in deinem Browser (localStorage) gespeichert — ohne den öffentlichen Server zu verändern.',
-                    'Toutes les ingestions, chaînes photo, annotations et éditions restent enregistrées localement dans votre navigateur (localStorage).'
+                    'Unlocks source ingestions, photo-chain commits, annotations, manual relations, and multi-project .echo.json export privately in your browser.',
+                    'Schaltet Quellen-Upload, Fotoketten-Commits, Annotationen, manuelle Relationen und .echo.json-Projekt-Export privat in deinem Browser frei.',
+                    'Débloque l’import de sources, chaînes photo, annotations, liens manuels et l’export .echo.json localement dans votre navigateur.'
                   )}
                 </div>
                 <button
@@ -4794,73 +5059,350 @@ export default function App() {
                   }}
                 >
                   {t(
-                    'Enable Local Sandbox Researcher Mode',
-                    'Lokalen Sandbox-Forschermodus aktivieren',
-                    'Activer le mode chercheur bac à sable'
+                    'Enable Local Researcher Workspace',
+                    'Lokalen Forscher-Modus aktivieren',
+                    'Activer l’espace chercheur local'
                   )}
                 </button>
               </div>
             )}
 
-            <form onSubmit={handleLogin}>
-              <div style={{ marginBottom: '14px' }}>
-                <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, marginBottom: '6px', color: '#3F3E3A' }}>
-                  {t('Server Researcher Password', 'Server-Forscher-Passwort', 'Mot de passe chercheur serveur')}
-                </label>
-                <input
-                  type="password"
-                  value={loginPassword}
-                  onChange={(e) => setLoginPassword(e.target.value)}
-                  placeholder={t('Enter password…', 'Passwort eingeben…', 'Saisir le mot de passe…')}
-                  autoFocus={!isStaticSnapshotMode()}
-                  style={{
-                    width: '100%',
-                    padding: '8px 10px',
-                    border: '1px solid #D8D5CD',
-                    borderRadius: '2px',
-                    fontSize: '12px',
-                    boxSizing: 'border-box',
-                    outline: 'none'
-                  }}
-                />
-              </div>
-
-              {loginError && (
-                <div style={{
-                  padding: '8px 10px',
-                  backgroundColor: '#FEF2F2',
-                  border: '1px solid #E5B8B8',
-                  borderLeft: '3px solid #991B1B',
-                  color: '#991B1B',
-                  fontSize: '11px',
-                  fontWeight: 500,
-                  marginBottom: '14px'
-                }}>
-                  {loginError}
+            {!isResearcher && (
+              <form onSubmit={handleLogin}>
+                <div style={{ marginBottom: '12px' }}>
+                  <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, marginBottom: '6px', color: '#3F3E3A' }}>
+                    {t('Self-Hosted Server Key (optional on static demo)', 'Server-Forscher-Schlüssel (optional im Browser-Modus)', 'Clé serveur chercheur (facultatif en mode navigateur)')}
+                  </label>
+                  <input
+                    type="password"
+                    value={loginPassword}
+                    onChange={(e) => setLoginPassword(e.target.value)}
+                    placeholder={t('Enter server researcher key…', 'Server-Schlüssel eingeben…', 'Saisir la clé serveur…')}
+                    autoFocus={!isStaticSnapshotMode()}
+                    style={{
+                      width: '100%',
+                      padding: '8px 10px',
+                      border: '1px solid #D8D5CD',
+                      borderRadius: '2px',
+                      fontSize: '12px',
+                      boxSizing: 'border-box',
+                      outline: 'none'
+                    }}
+                  />
                 </div>
-              )}
 
-              <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                {loginError && (
+                  <div style={{
+                    padding: '8px 10px',
+                    backgroundColor: '#FEF2F2',
+                    border: '1px solid #E5B8B8',
+                    borderLeft: '3px solid #991B1B',
+                    color: '#991B1B',
+                    fontSize: '11px',
+                    fontWeight: 500,
+                    marginBottom: '12px'
+                  }}>
+                    {loginError}
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                  <button
+                    type="button"
+                    onClick={() => { setShowLoginModal(false); setLoginError(null); }}
+                    className="archival-btn"
+                    style={{ padding: '7px 12px', fontSize: '11.5px' }}
+                  >
+                    {t('Cancel', 'Abbrechen', 'Annuler')}
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isLoggingIn || !loginPassword.trim()}
+                    className="archival-btn archival-btn-primary"
+                    style={{ padding: '7px 14px', fontSize: '11.5px' }}
+                  >
+                    {isLoggingIn
+                      ? t('Verifying…', 'Prüfe…', 'Vérification…')
+                      : t('Sign in', 'Anmelden', 'Connexion')}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Multi-Project Case Manager Modal (Create / Switch / Export .echo.json / Import / Merge Layer) */}
+      {showProjectsModal && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(20,20,19,0.55)',
+          zIndex: 99998,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          backdropFilter: 'blur(3px)'
+        }}>
+          <div
+            data-testid="projects-modal"
+            style={{
+              backgroundColor: '#FFFFFF',
+              border: '1px solid #1C1B19',
+              borderRadius: '2px',
+              boxShadow: '0 20px 50px rgba(20,20,19,0.24)',
+              width: '94%',
+              maxWidth: '580px',
+              maxHeight: '88vh',
+              overflowY: 'auto',
+              padding: '22px 24px',
+              fontFamily: 'var(--font-sans)'
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', borderBottom: '1px solid #D8D5CD', paddingBottom: '10px' }}>
+              <div>
+                <div style={{ fontFamily: 'var(--font-serif)', fontSize: '17px', fontWeight: 700, color: '#141413' }}>
+                  {t('Provenance Cases & .echo.json Workspaces', 'Provenienz-Projekte & .echo.json-Dateien', 'Dossiers de provenance & fichiers .echo.json')}
+                </div>
+                <div style={{ fontSize: '11px', color: '#6E6C66', marginTop: '2px' }}>
+                  {t(
+                    'Work in isolated cases, save/load portable .echo.json files, or merge a case as a toggleable source layer.',
+                    'Arbeite in getrennten Fallakten, speichere/lade portable .echo.json-Dateien oder mische ein Projekt als eigene Quellen-Schicht dazu.',
+                    'Travaillez dans des dossiers séparés, enregistrez/chargez des fichiers .echo.json ou fusionnez un dossier comme couche source.'
+                  )}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowProjectsModal(false)}
+                className="archival-btn"
+                style={{ padding: '2px 8px', fontSize: '12px' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {projectStatusMsg && (
+              <div style={{ padding: '8px 10px', marginBottom: '12px', backgroundColor: '#F0FDF4', border: '1px solid #86EFAC', borderLeft: '3px solid #166534', color: '#166534', fontSize: '11.5px', fontWeight: 500 }}>
+                {projectStatusMsg}
+              </div>
+            )}
+
+            {/* Existing Cases List */}
+            <div style={{ marginBottom: '16px' }}>
+              <div style={{ fontSize: '10.5px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#52514C', marginBottom: '8px', fontFamily: 'var(--font-mono)' }}>
+                {t('Saved Cases in Browser', 'Gespeicherte Projekte im Browser', 'Dossiers enregistrés dans le navigateur')} ({projects.length})
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                {projects.map((p) => {
+                  const isCurrent = p.id === activeProject.id;
+                  const annCount = Object.values(p.annotations || {}).reduce((acc, arr) => acc + (Array.isArray(arr) ? arr.length : 0), 0);
+                  return (
+                    <div
+                      key={p.id}
+                      data-testid={`project-row-${p.id}`}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: '10px',
+                        padding: '10px 12px',
+                        border: isCurrent ? '1px solid #155E75' : '1px solid #D8D5CD',
+                        borderLeft: isCurrent ? '3px solid #155E75' : '1px solid #D8D5CD',
+                        backgroundColor: isCurrent ? '#F0F9FF' : '#FBFBF9',
+                      }}
+                    >
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                          <span style={{ fontWeight: 700, fontSize: '12.5px', color: '#141413' }}>
+                            {p.id === DEFAULT_PROJECT_ID ? t('Cameroon Colonial Atlas (Default)', 'Kamerun-Atlas (Standard)', 'Atlas colonial du Cameroun (Défaut)') : p.name}
+                          </span>
+                          <span style={{ fontFamily: 'var(--font-mono)', fontSize: '9.5px', padding: '1px 5px', border: '1px solid #D8D5CD', backgroundColor: '#FFFFFF', color: '#52514C' }}>
+                            {p.includeBaseBundle ? t('Base + Layers', 'Basis + Schichten', 'Base + Couches') : t('Isolated Case', 'Eigenes Projekt', 'Dossier isolé')}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: '10.5px', color: '#6E6C66', marginTop: '3px', fontFamily: 'var(--font-mono)' }}>
+                          {(p.publications || []).length} {t('sources', 'Quellen', 'sources')} · {(p.edges || []).length} {t('added edges', 'eigene Kanten', 'arêtes')} · {annCount} {t('notes', 'Notizen', 'notes')}
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexShrink: 0 }}>
+                        {!isCurrent && (
+                          <button
+                            type="button"
+                            data-testid={`project-load-${p.id}`}
+                            onClick={() => {
+                              setActiveProjectId(p.id);
+                              reloadActiveWorkspace();
+                              setProjectStatusMsg(t(`Switched to "${p.name}".`, `Gewechselt zu „${p.name}“.`, `Basculé vers « ${p.name} ».`));
+                            }}
+                            className="archival-btn archival-btn-primary"
+                            style={{ padding: '4px 9px', fontSize: '10.5px' }}
+                          >
+                            {t('Open', 'Laden', 'Ouvrir')}
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          data-testid={`project-export-${p.id}`}
+                          onClick={() => {
+                            const payload = exportProjectPayload(p.id);
+                            const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' });
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            const slug = (p.name || p.id).replace(/[^a-zA-Z0-9_-]+/g, '_').slice(0, 40);
+                            a.href = url;
+                            a.download = `ProjectEcho_${slug}.echo.json`;
+                            a.click();
+                            setTimeout(() => URL.revokeObjectURL(url), 1000);
+                            setProjectStatusMsg(t(`Exported "${a.download}".`, `Exportiert: „${a.download}“.`, `Exporté : « ${a.download} ».`));
+                          }}
+                          className="archival-btn"
+                          style={{ padding: '4px 8px', fontSize: '10.5px' }}
+                          title={t('Download portable .echo.json file', 'Als portable .echo.json-Datei speichern', 'Télécharger en .echo.json')}
+                        >
+                          .echo.json ↓
+                        </button>
+                        {!p.builtin && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!window.confirm(t(`Delete local project "${p.name}"?`, `Lokales Projekt „${p.name}“ löschen?`, `Supprimer le dossier local « ${p.name} » ?`))) return;
+                              deleteProject(p.id);
+                              reloadActiveWorkspace();
+                            }}
+                            className="archival-btn"
+                            style={{ padding: '4px 7px', fontSize: '10.5px', color: '#991B1B', borderColor: '#E5B8B8' }}
+                            title={t('Delete project', 'Projekt löschen', 'Supprimer')}
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Create New Case */}
+            <div style={{ padding: '12px 14px', backgroundColor: '#F7F6F2', border: '1px solid #D8D5CD', marginBottom: '14px' }}>
+              <div style={{ fontSize: '10.5px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#141413', marginBottom: '8px', fontFamily: 'var(--font-mono)' }}>
+                {t('+ Create New Case / Project', '+ Neues Projekt / neue Fallakte anlegen', '+ Créer un nouveau dossier')}
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <input
+                  type="text"
+                  data-testid="new-project-name-input"
+                  value={newProjName}
+                  onChange={(e) => setNewProjName(e.target.value)}
+                  placeholder={t('Case title (e.g. Benin 1897 Inventory, Private Collection X)', 'Projekttitel (z. B. Benin 1897, Sammlung X)', 'Titre du dossier (ex. Bénin 1897, Collection X)')}
+                  style={{ width: '100%', padding: '7px 9px', border: '1px solid #D8D5CD', backgroundColor: '#FFFFFF', fontSize: '12px', boxSizing: 'border-box' }}
+                />
+                <input
+                  type="text"
+                  value={newProjDesc}
+                  onChange={(e) => setNewProjDesc(e.target.value)}
+                  placeholder={t('Short scope note (optional)', 'Kurze Beschreibung (optional)', 'Brève description (facultatif)')}
+                  style={{ width: '100%', padding: '7px 9px', border: '1px solid #D8D5CD', backgroundColor: '#FFFFFF', fontSize: '11.5px', boxSizing: 'border-box' }}
+                />
+                <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center', fontSize: '11.5px', color: '#3F3E3A' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer' }}>
+                    <input type="radio" checked={!newProjIncludeBase} onChange={() => setNewProjIncludeBase(false)} />
+                    <span>{t('Clean empty canvas (0 nodes)', 'Leer starten (0 Knoten)', 'Démarrer vide (0 nœud)')}</span>
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer' }}>
+                    <input type="radio" checked={newProjIncludeBase} onChange={() => setNewProjIncludeBase(true)} />
+                    <span>{t('Fork Cameroon Atlas corpus', 'Mit Kamerun-Korpus starten', 'Partir de l’Atlas Cameroun')}</span>
+                  </label>
+                </div>
                 <button
                   type="button"
-                  onClick={() => { setShowLoginModal(false); setLoginError(null); }}
-                  className="archival-btn"
-                  style={{ padding: '7px 12px', fontSize: '11.5px' }}
-                >
-                  {t('Cancel', 'Abbrechen', 'Annuler')}
-                </button>
-                <button
-                  type="submit"
-                  disabled={isLoggingIn || !loginPassword.trim()}
+                  data-testid="create-project-btn"
+                  disabled={!newProjName.trim()}
+                  onClick={() => {
+                    const created = createProject({
+                      name: newProjName,
+                      description: newProjDesc,
+                      includeBaseBundle: newProjIncludeBase,
+                    });
+                    // Enable local workspace editing automatically for a freshly created project in static mode
+                    if (isStaticSnapshotMode() && !isResearcher) {
+                      localStorage.setItem('echo_researcher_token', 'echo-static-sandbox');
+                      setIsResearcher(true);
+                    }
+                    setNewProjName('');
+                    setNewProjDesc('');
+                    reloadActiveWorkspace();
+                    setShowProjectsModal(false);
+                    if (!created.includeBaseBundle) setViewMode('graph');
+                  }}
                   className="archival-btn archival-btn-primary"
-                  style={{ padding: '7px 14px', fontSize: '11.5px' }}
+                  style={{ padding: '8px 12px', fontSize: '11.5px', justifyContent: 'center', opacity: newProjName.trim() ? 1 : 0.55 }}
                 >
-                  {isLoggingIn
-                    ? t('Verifying…', 'Prüfe…', 'Vérification…')
-                    : t('Sign in', 'Anmelden', 'Connexion')}
+                  {t('Create & Open Project', 'Projekt anlegen & öffnen', 'Créer et ouvrir le dossier')}
                 </button>
               </div>
-            </form>
+            </div>
+
+            {/* Import or Merge .echo.json */}
+            <div style={{ padding: '12px 14px', border: '1px dashed #B9B5AC', backgroundColor: '#FBFBF9' }}>
+              <div style={{ fontSize: '10.5px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#141413', marginBottom: '6px', fontFamily: 'var(--font-mono)' }}>
+                {t('Import .echo.json (Load Separate or Stitch as Layer)', '.echo.json laden (getrennt oder als Schicht dazumischen)', 'Importer .echo.json (séparé ou fusionné en couche)')}
+              </div>
+              <input
+                ref={projectImportInputRef}
+                type="file"
+                accept=".json,.echo.json,application/json"
+                style={{ display: 'none' }}
+                onChange={async (e) => {
+                  const f = e.target.files?.[0];
+                  e.target.value = '';
+                  if (!f) return;
+                  try {
+                    const parsed = JSON.parse(await f.text());
+                    if (importMode === 'merge') {
+                      const res = mergeProjectAsLayer(parsed);
+                      reloadActiveWorkspace();
+                      setProjectStatusMsg(t(
+                        `Merged "${res.layerName}" as toggleable layer (+${res.addedEdges} edges, +${res.addedPubs} sources, +${res.addedAnnotations} notes).`,
+                        `„${res.layerName}“ als zuschaltbare Schicht eingemischt (+${res.addedEdges} Kanten, +${res.addedPubs} Quellen, +${res.addedAnnotations} Notizen).`,
+                        `« ${res.layerName} » fusionné comme couche (+${res.addedEdges} arêtes, +${res.addedPubs} sources, +${res.addedAnnotations} notes).`
+                      ));
+                    } else {
+                      const imp = importProjectAsNew(parsed);
+                      reloadActiveWorkspace();
+                      setProjectStatusMsg(t(
+                        `Imported "${imp.name}" as separate case.`,
+                        `„${imp.name}“ als eigenes Projekt geladen.`,
+                        `« ${imp.name} » importé comme dossier séparé.`
+                      ));
+                    }
+                  } catch (err: any) {
+                    alert(err?.message || t('Could not parse .echo.json file.', 'Konnte .echo.json-Datei nicht lesen.', 'Impossible de lire le fichier .echo.json.'));
+                  }
+                }}
+              />
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  data-testid="import-project-new-btn"
+                  onClick={() => { setImportMode('new'); projectImportInputRef.current?.click(); }}
+                  className="archival-btn"
+                  style={{ padding: '6px 11px', fontSize: '11px' }}
+                >
+                  {t('Load as separate case…', 'Als eigenes Projekt laden…', 'Charger comme dossier séparé…')}
+                </button>
+                <button
+                  type="button"
+                  data-testid="import-project-merge-btn"
+                  onClick={() => { setImportMode('merge'); projectImportInputRef.current?.click(); }}
+                  className="archival-btn"
+                  style={{ padding: '6px 11px', fontSize: '11px', borderColor: '#155E75', color: '#155E75' }}
+                >
+                  {t('Merge as layer into active case…', 'Als Schicht ins aktive Projekt mischen…', 'Fusionner en couche dans le dossier actif…')}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
