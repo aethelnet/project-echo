@@ -165,11 +165,10 @@ button, input, select, textarea {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  background-color: rgba(20, 20, 19, 0.92);
+  background-color: rgba(20, 20, 19, 0.94);
   padding: 4px;
   border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 2px;
-  backdrop-filter: blur(6px);
 }
 
 .geo-hud-right {
@@ -177,7 +176,7 @@ button, input, select, textarea {
   top: 14px;
   right: 14px;
   z-index: 20;
-  background-color: rgba(20, 20, 19, 0.92);
+  background-color: rgba(20, 20, 19, 0.94);
   border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 2px;
   padding: 10px 13px;
@@ -185,7 +184,6 @@ button, input, select, textarea {
   font-family: 'Inter', sans-serif;
   font-size: 11px;
   max-width: 305px;
-  backdrop-filter: blur(6px);
 }
 
 .geo-legend {
@@ -193,7 +191,7 @@ button, input, select, textarea {
   bottom: 14px;
   left: 14px;
   z-index: 20;
-  background-color: rgba(20, 20, 19, 0.92);
+  background-color: rgba(20, 20, 19, 0.94);
   border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 2px;
   padding: 7px 13px;
@@ -205,7 +203,6 @@ button, input, select, textarea {
   font-size: 10.5px;
   color: #E7E5E0;
   max-width: calc(100% - 170px);
-  backdrop-filter: blur(6px);
 }
 
 /* Keep Leaflet Zoom above the fixed bottom-right Legal Notice button */

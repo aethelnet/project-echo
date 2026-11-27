@@ -102,7 +102,8 @@ export default function GeodataMap({
       minZoom: 2,
       maxZoom: 18,
       zoomControl: false,
-      attributionControl: false
+      attributionControl: false,
+      preferCanvas: true
     });
 
     // Free OpenStreetMap Tiles with CSS Inversion for Brutalist Dark Matter look
@@ -507,8 +508,7 @@ export default function GeodataMap({
             cursor: 'pointer',
             textAlign: 'left',
             alignSelf: 'flex-start',
-            borderRadius: '2px',
-            backdropFilter: 'blur(6px)'
+            borderRadius: '2px'
           }}
         >
           {showExpeditions

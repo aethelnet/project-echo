@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback, useDeferredValue } from 'react';
 import ForceGraph2D from 'react-force-graph-2d';
 import GeodataMap from './GeodataMap';
 import VisualForensicsView from './VisualForensicsView';
@@ -24,8 +24,9 @@ export default function App() {
   // Inspector & Selection States
   const [selectedNode, setSelectedNode] = useState<any>(null);
   const [selectedLink, setSelectedLink] = useState<any>(null);
-  const [hoveredLink, setHoveredLink] = useState<any>(null);
+  const hoveredLinkRef = useRef<any>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const deferredSearchTerm = useDeferredValue(searchTerm);
   
   // View Mode: 'graph' | 'map' | 'visual' | 'docs'
   const [viewMode, setViewMode] = useState<'graph' | 'map' | 'visual' | 'docs'>('graph');
@@ -293,6 +294,29 @@ export default function App() {
           rawLinks.forEach((link: any) => {
             const s = typeof link.source === 'object' ? (link.source.id || link.source) : link.source;
             const t = typeof link.target === 'object' ? (link.target.id || link.target) : link.target;
+            link._sId = s;
+            link._tId = t;
+            link._isRaub = link.type === 'RAUBTE' || link.delikt === 'RAUBTE' || link.type === 'ENTEIGNETE';
+            link._isSchenk = link.type === 'SCHENKTE' || link.type === 'VERKAUFTE_AN';
+            link._isVerdacht = link.type === 'VERDACHT_AUF';
+            link._baseColor = link._isVerdacht
+              ? '#0891B2'
+              : link._isRaub
+                ? '#DC2626'
+                : link._isSchenk
+                  ? '#2563EB'
+                  : link.type === 'LAGERT_IN'
+                    ? '#CBD5E1'
+                    : '#CBD5E1';
+            link._baseWidth = link._isVerdacht
+              ? 2.0
+              : link._isRaub
+                ? 1.6
+                : link._isSchenk
+                  ? 1.3
+                  : link.type === 'LAGERT_IN'
+                    ? 0.75
+                    : 0.75;
             const key = s < t ? `${s}--${t}` : `${t}--${s}`;
             if (!pairMap.has(key)) pairMap.set(key, []);
             pairMap.get(key)!.push(link);
@@ -335,13 +359,20 @@ export default function App() {
           try {
             const guestLayout = JSON.parse(localStorage.getItem('echo_guest_layout') || '{}');
             rawNodes.forEach((n: any) => {
+              n._labelLower = n.label ? String(n.label).toLowerCase() : '';
+              n._descLower = n.desc ? String(n.desc).toLowerCase() : '';
               const coords = guestLayout[n.id] || guestLayout[n.name];
               if (coords && typeof coords.x === 'number' && typeof coords.y === 'number') {
                 n.fx = coords.x;
                 n.fy = coords.y;
               }
             });
-          } catch (e) {}
+          } catch (e) {
+            rawNodes.forEach((n: any) => {
+              n._labelLower = n.label ? String(n.label).toLowerCase() : '';
+              n._descLower = n.desc ? String(n.desc).toLowerCase() : '';
+            });
+          }
 
           setGraphData({ nodes: rawNodes, links: rawLinks });
           setTimeout(() => {
@@ -1284,7 +1315,21 @@ export default function App() {
     }
   };
 
-  // 8. Custom Node Rendering
+  // Pause background graph canvas animation when on Map/Visual/Docs tabs for 0ms tab switching
+  useEffect(() => {
+    if (!fgRef.current) return;
+    try {
+      if (viewMode === 'graph') {
+        fgRef.current.resumeAnimation?.();
+      } else {
+        fgRef.current.pauseAnimation?.();
+      }
+    } catch (_e) {}
+  }, [viewMode]);
+
+  const deferredSearchLower = useMemo(() => deferredSearchTerm.trim().toLowerCase(), [deferredSearchTerm]);
+
+  // 8. Custom Node Rendering (LOD + cached text measurement for smooth 60fps pan/zoom)
   const nodeCanvasObject = useCallback((node: any, ctx: CanvasRenderingContext2D, globalScale: number) => {
     const isGhost = ghostIds.has(node.id);
     const isContested = contestedIds.has(node.id) || Boolean(node.contested);
@@ -1295,47 +1340,50 @@ export default function App() {
       (selectedLink.source.id || selectedLink.source) === node.id || 
       (selectedLink.target.id || selectedLink.target) === node.id
     );
-    const qLower = searchTerm ? searchTerm.toLowerCase() : '';
-    const matchesSearch = Boolean(qLower && ((node.label && node.label.toLowerCase().includes(qLower)) || (node.desc && node.desc.toLowerCase().includes(qLower))));
+    const matchesSearch = Boolean(
+      deferredSearchLower &&
+      ((node._labelLower && node._labelLower.includes(deferredSearchLower)) ||
+       (node._descLower && node._descLower.includes(deferredSearchLower)))
+    );
 
     // Basis-Farben
-    let color = '#475569'; // Standard: Subjekt (Dunkelschiefer)
-    let radius = 3.5;
-    let strokeColor = '#000000';
-    let strokeWidth = 1.0;
+    let color = '#52514C';
+    let radius = 3.2;
+    let strokeColor = '#141413';
+    let strokeWidth = 0.8;
 
     if (node.type === 'Akteur') {
-      color = '#B45309'; // Dunkelbernstein / Bronze
-      radius = 6.5;
-      strokeWidth = 1.5;
+      color = '#9A3412';
+      radius = 6.2;
+      strokeWidth = 1.2;
     } else if (node.type === 'Institution') {
-      color = '#000000'; // Tiefschwarzer Institutions-Anker
-      radius = 10;
-      strokeColor = '#000000';
-      strokeWidth = 2.0;
+      color = '#141413';
+      radius = 9.5;
+      strokeColor = '#141413';
+      strokeWidth = 1.6;
     }
 
     if (isGhost) {
       color = '#DC2626';
-      radius = ghostMode ? 8.5 : 5;
+      radius = ghostMode ? 8.2 : 4.5;
     }
 
     if (isContested) {
       color = '#CA8A04';
-      radius = (activeMetricFilter === 'dissonanz') ? 8.5 : 5;
+      radius = (activeMetricFilter === 'dissonanz') ? 8.2 : 4.5;
     }
 
     if (isGap && activeMetricFilter === 'luecken') {
-      color = '#7C3AED';
-      radius = 8.5;
+      color = '#6D28D9';
+      radius = 8.2;
     }
 
     if (isSuspicion && activeMetricFilter === 'verdacht') {
       color = '#0891B2';
-      radius = 8.5;
+      radius = 8.2;
     }
 
-    // INTERAKTIVER METRIK-FILTER & TÄTER/DEPOT-ISOLATION (Dunkle Schatten)
+    // INTERAKTIVER METRIK-FILTER & TÄTER/DEPOT-ISOLATION
     let isDimmed = false;
     let isFocalNode = false;
     let isEntityConnected = true;
@@ -1360,17 +1408,21 @@ export default function App() {
     }
 
     if (isDimmed) {
-      color = focusedSubnetwork ? 'rgba(203, 213, 225, 0.08)' : 'rgba(203, 213, 225, 0.25)';
-      strokeColor = focusedSubnetwork ? 'rgba(203, 213, 225, 0.12)' : 'rgba(203, 213, 225, 0.4)';
-      radius = Math.max(1.4, radius * 0.35);
+      color = focusedSubnetwork ? 'rgba(180, 177, 168, 0.14)' : 'rgba(180, 177, 168, 0.30)';
+      radius = Math.max(1.3, radius * 0.38);
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, radius, 0, 2 * Math.PI, false);
+      ctx.fillStyle = color;
+      ctx.fill();
+      return;
     }
 
     // Halo-Ringe & Fokussierungs-Aura
     if (isFocalNode) {
-      radius = node.type === 'Institution' ? 14 : 10;
+      radius = node.type === 'Institution' ? 13.5 : 9.5;
       ctx.beginPath();
-      ctx.arc(node.x, node.y, radius + 8, 0, 2 * Math.PI, false);
-      ctx.fillStyle = node.type === 'Institution' ? 'rgba(0, 0, 0, 0.25)' : 'rgba(180, 83, 9, 0.3)';
+      ctx.arc(node.x, node.y, radius + 7, 0, 2 * Math.PI, false);
+      ctx.fillStyle = node.type === 'Institution' ? 'rgba(20, 20, 19, 0.22)' : 'rgba(154, 52, 18, 0.28)';
       ctx.fill();
     } else if ((isGhost && ghostMode) || (activeMetricFilter === 'raub' && isGhost)) {
       ctx.beginPath();
@@ -1380,211 +1432,284 @@ export default function App() {
     } else if (isContested && activeMetricFilter === 'dissonanz') {
       ctx.beginPath();
       ctx.arc(node.x, node.y, radius + 5, 0, 2 * Math.PI, false);
-      ctx.fillStyle = 'rgba(202, 138, 4, 0.25)';
+      ctx.fillStyle = 'rgba(202, 138, 4, 0.24)';
       ctx.fill();
     } else if (isGap && activeMetricFilter === 'luecken') {
       ctx.beginPath();
       ctx.arc(node.x, node.y, radius + 6, 0, 2 * Math.PI, false);
-      ctx.fillStyle = 'rgba(124, 58, 237, 0.3)';
+      ctx.fillStyle = 'rgba(109, 40, 217, 0.26)';
       ctx.fill();
     } else if (isSuspicion && activeMetricFilter === 'verdacht') {
       ctx.beginPath();
       ctx.arc(node.x, node.y, radius + 6, 0, 2 * Math.PI, false);
-      ctx.fillStyle = 'rgba(8, 145, 178, 0.35)';
+      ctx.fillStyle = 'rgba(8, 145, 178, 0.3)';
       ctx.fill();
     }
 
     if (isSelected || isLinkEndpoint || matchesSearch) {
       ctx.beginPath();
       ctx.arc(node.x, node.y, radius + 4, 0, 2 * Math.PI, false);
-      ctx.strokeStyle = '#000000';
-      ctx.lineWidth = 2.5;
+      ctx.strokeStyle = '#141413';
+      ctx.lineWidth = 2.2;
       ctx.stroke();
     }
 
-    // Zeichne Knoten-Kreis
+    // Zeichne Knoten-Kreis (skip stroke on tiny overview Subjekt dots for 2x Canvas2D speed)
     ctx.beginPath();
     ctx.arc(node.x, node.y, radius, 0, 2 * Math.PI, false);
     ctx.fillStyle = color;
     ctx.fill();
 
-    // Rahmen
-    ctx.strokeStyle = strokeColor;
-    ctx.lineWidth = strokeWidth;
-    ctx.stroke();
-
-    if (node.type === 'Institution' && !isDimmed) {
-      ctx.beginPath();
-      ctx.arc(node.x, node.y, radius - 3, 0, 2 * Math.PI, false);
-      ctx.strokeStyle = '#FFFFFF';
-      ctx.lineWidth = 1.5;
+    if (node.type !== 'Subjekt' || globalScale >= 1.35 || isSelected || isLinkEndpoint || matchesSearch) {
+      ctx.strokeStyle = strokeColor;
+      ctx.lineWidth = strokeWidth;
       ctx.stroke();
     }
 
-    // Text Label Rendering
+    if (node.type === 'Institution') {
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, radius - 3, 0, 2 * Math.PI, false);
+      ctx.strokeStyle = '#F7F6F2';
+      ctx.lineWidth = 1.4;
+      ctx.stroke();
+    }
+
+    // Text Label Rendering (with cached measureText width)
     const shouldShowLabel = 
       isFocalNode ||
       (focusedSubnetwork && isEntityConnected && (node.type === 'Institution' || node.type === 'Akteur' || isSelected || isLinkEndpoint)) ||
       isSelected || 
       isLinkEndpoint ||
-      (node.type === 'Institution' && !isDimmed) || 
+      node.type === 'Institution' || 
       (isGhost && ghostMode) || 
       (isContested && activeMetricFilter === 'dissonanz') ||
       (isGap && activeMetricFilter === 'luecken') ||
       (isSuspicion && activeMetricFilter === 'verdacht') ||
-      (node.type === 'Akteur' && globalScale > 1.6 && !isDimmed) || 
+      (node.type === 'Akteur' && globalScale > 1.55) || 
       matchesSearch || 
-      globalScale > 3.0;
+      globalScale > 3.2;
 
     if (shouldShowLabel) {
       const label = node.label || node.id;
       const fontSize = Math.max(9 / globalScale, 2.5);
-      ctx.font = `${node.type === 'Institution' || isFocalNode ? 'bold ' : ''}${fontSize}px 'Space Mono', monospace`;
+      const isBold = node.type === 'Institution' || isFocalNode;
+      ctx.font = `${isBold ? 'bold ' : ''}${fontSize}px 'Space Mono', monospace`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
 
-      const textWidth = ctx.measureText(label).width;
-      const boxPadding = 3;
+      if (node._tw10 === undefined) {
+        const prevFont = ctx.font;
+        ctx.font = `${isBold ? 'bold ' : ''}10px 'Space Mono', monospace`;
+        node._tw10 = ctx.measureText(label).width;
+        ctx.font = prevFont;
+      }
+      const textWidth = node._tw10 * (fontSize / 10);
+      const boxPadding = 2.8;
 
       ctx.fillStyle = '#FFFFFF';
-      ctx.fillRect(node.x - textWidth / 2 - boxPadding, node.y + radius + 2, textWidth + boxPadding * 2, fontSize + 4);
-      ctx.strokeStyle = isFocalNode ? '#000000' : (isGhost ? '#DC2626' : (isContested ? '#CA8A04' : (isGap && activeMetricFilter === 'luecken' ? '#7C3AED' : (isSuspicion && activeMetricFilter === 'verdacht' ? '#0891B2' : '#000000'))));
-      ctx.lineWidth = isFocalNode ? 2 : 1;
-      ctx.strokeRect(node.x - textWidth / 2 - boxPadding, node.y + radius + 2, textWidth + boxPadding * 2, fontSize + 4);
+      ctx.fillRect(node.x - textWidth / 2 - boxPadding, node.y + radius + 2, textWidth + boxPadding * 2, fontSize + 3.6);
+      ctx.strokeStyle = isFocalNode ? '#141413' : (isGhost ? '#991B1B' : (isContested ? '#92400E' : (isGap && activeMetricFilter === 'luecken' ? '#5B21B6' : (isSuspicion && activeMetricFilter === 'verdacht' ? '#155E75' : '#A3A097'))));
+      ctx.lineWidth = isFocalNode ? 1.5 : 0.8;
+      ctx.strokeRect(node.x - textWidth / 2 - boxPadding, node.y + radius + 2, textWidth + boxPadding * 2, fontSize + 3.6);
 
-      ctx.fillStyle = isFocalNode ? '#000000' : (isGhost ? '#DC2626' : (isContested ? '#854D0E' : (isGap && activeMetricFilter === 'luecken' ? '#7C3AED' : (isSuspicion && activeMetricFilter === 'verdacht' ? '#0E7490' : '#000000'))));
-      ctx.fillText(label, node.x, node.y + radius + fontSize / 2 + 4);
+      ctx.fillStyle = isFocalNode ? '#141413' : (isGhost ? '#991B1B' : (isContested ? '#854D0E' : (isGap && activeMetricFilter === 'luecken' ? '#5B21B6' : (isSuspicion && activeMetricFilter === 'verdacht' ? '#155E75' : '#141413'))));
+      ctx.fillText(label, node.x, node.y + radius + fontSize / 2 + 3.8);
     }
-  }, [ghostIds, ghostMode, contestedIds, gapIds, suspicionIds, activeMetricFilter, selectedNode, selectedLink, searchTerm, focusedSubnetwork]);
+  }, [ghostIds, ghostMode, contestedIds, gapIds, suspicionIds, activeMetricFilter, selectedNode, selectedLink, deferredSearchLower, focusedSubnetwork]);
 
-  // 9. Custom Link Styling
-  const linkColor = useCallback((link: any) => {
-    const isRaub = link.type === 'RAUBTE' || link.delikt === 'RAUBTE' || link.type === 'ENTEIGNETE';
-    const isSchenkung = link.type === 'SCHENKTE' || link.type === 'VERKAUFTE_AN';
-    const isVerdacht = link.type === 'VERDACHT_AUF';
-    const isSelected = selectedLink && (
-      ((selectedLink.source.id || selectedLink.source) === (link.source.id || link.source)) &&
-      ((selectedLink.target.id || selectedLink.target) === (link.target.id || link.target)) &&
-      selectedLink.type === link.type
-    );
-    const isHovered = hoveredLink === link;
+  // 9. Ultra-Fast Batched Canvas Link Renderer (5 batched paths vs 13,256 individual strokes/frame!)
+  const hideBuiltInLinks = useCallback(() => false, []);
 
-    if (isSelected || isHovered) {
-      return isRaub ? '#991B1B' : (isSchenkung ? '#1D4ED8' : (isVerdacht ? '#0E7490' : '#000000'));
-    }
-
-    // Forensischer Entitaeten-Fokus (Täter- & Depot-Isolation in dunkle Schatten)
+  const isLinkVisible = useCallback((link: any) => {
     if (focusedSubnetwork) {
-      if (!focusedSubnetwork.linkSet.has(link)) {
-        return 'rgba(203, 213, 225, 0.03)';
-      }
+      return focusedSubnetwork.linkSet.has(link);
     }
-
-    // Interaktive Filter-Dimmung
-    if (activeMetricFilter === 'verdacht') {
-      return isVerdacht ? '#0891B2' : 'rgba(203, 213, 225, 0.08)';
-    }
+    if (activeMetricFilter === 'verdacht') return Boolean(link._isVerdacht);
     if (activeMetricFilter === 'luecken') {
-      const sId = link.source.id || link.source;
-      const tId = link.target.id || link.target;
-      if (gapIds.has(sId) || gapIds.has(tId)) {
-        return '#7C3AED';
-      }
-      return 'rgba(203, 213, 225, 0.12)';
+      const sId = link._sId || link.source?.id || link.source;
+      const tId = link._tId || link.target?.id || link.target;
+      return gapIds.has(sId) || gapIds.has(tId);
     }
-    if (activeMetricFilter === 'raub') {
-      return isRaub ? '#DC2626' : 'rgba(203, 213, 225, 0.15)';
-    }
-    if (activeMetricFilter === 'schenkung') {
-      return isSchenkung ? '#2563EB' : 'rgba(203, 213, 225, 0.15)';
-    }
-    if (activeMetricFilter === 'dissonanz') {
-      if (link.kollision) {
-        return isRaub ? '#DC2626' : (isSchenkung ? '#2563EB' : '#CA8A04');
-      }
-      return 'rgba(203, 213, 225, 0.12)';
-    }
+    if (activeMetricFilter === 'raub') return Boolean(link._isRaub);
+    if (activeMetricFilter === 'schenkung') return Boolean(link._isSchenk);
+    if (activeMetricFilter === 'dissonanz') return Boolean(link.kollision);
     if (ghostMode) {
-      return 'rgba(203, 213, 225, 0.15)';
+      const sId = link._sId || link.source?.id || link.source;
+      const tId = link._tId || link.target?.id || link.target;
+      return ghostIds.has(sId) || ghostIds.has(tId);
+    }
+    return true;
+  }, [focusedSubnetwork, activeMetricFilter, gapIds, ghostMode, ghostIds]);
+
+  const visibleLinksList = useMemo(() => {
+    if (!focusedSubnetwork && !activeMetricFilter && !ghostMode) {
+      return graphData.links;
+    }
+    return graphData.links.filter(isLinkVisible);
+  }, [graphData.links, focusedSubnetwork, activeMetricFilter, ghostMode, isLinkVisible]);
+
+  // Pre-partition visible links into 5 style buckets so pan/zoom makes only 5 ctx.stroke() calls total!
+  const linkBuckets = useMemo(() => {
+    const bg: any[] = [];
+    const donation: any[] = [];
+    const loot: any[] = [];
+    const dissonance: any[] = [];
+    const suspicion: any[] = [];
+    for (let i = 0; i < visibleLinksList.length; i++) {
+      const l = visibleLinksList[i];
+      if (l._isVerdacht) suspicion.push(l);
+      else if (activeMetricFilter === 'dissonanz' && l.kollision && !l._isRaub && !l._isSchenk) dissonance.push(l);
+      else if (l._isRaub) loot.push(l);
+      else if (l._isSchenk) donation.push(l);
+      else bg.push(l);
+    }
+    return { bg, donation, loot, dissonance, suspicion };
+  }, [visibleLinksList, activeMetricFilter]);
+
+  const onRenderFramePre = useCallback((ctx: CanvasRenderingContext2D, globalScale: number) => {
+    const fg = fgRef.current;
+    let minX = -Infinity, maxX = Infinity, minY = -Infinity, maxY = Infinity;
+    if (fg && fg.screen2GraphCoords) {
+      const tl = fg.screen2GraphCoords(0, 0);
+      const br = fg.screen2GraphCoords(canvasDimensions.width, canvasDimensions.height);
+      const pad = 120 / Math.max(0.25, globalScale);
+      minX = Math.min(tl.x, br.x) - pad;
+      maxX = Math.max(tl.x, br.x) + pad;
+      minY = Math.min(tl.y, br.y) - pad;
+      maxY = Math.max(tl.y, br.y) + pad;
     }
 
-    if (isVerdacht) return '#0891B2';
-    if (isRaub) return '#DC2626';
-    if (isSchenkung) return '#2563EB';
-    if (link.type === 'LAGERT_IN') return '#64748B';
-    return '#CBD5E1';
-  }, [activeMetricFilter, ghostMode, gapIds, selectedLink, hoveredLink, focusedSubnetwork]);
+    const strokeBucket = (list: any[], color: string, width: number, dashed = false) => {
+      if (list.length === 0) return;
+      ctx.beginPath();
+      if (dashed) ctx.setLineDash([5, 4]);
+      for (let i = 0; i < list.length; i++) {
+        const l = list[i];
+        const s = l.source;
+        const e = l.target;
+        if (!s || !e || s.x === undefined || e.x === undefined) continue;
+        // Fast frustum culling
+        if ((s.x < minX && e.x < minX) || (s.x > maxX && e.x > maxX) || (s.y < minY && e.y < minY) || (s.y > maxY && e.y > maxY)) {
+          continue;
+        }
+        ctx.moveTo(s.x, s.y);
+        const curv = l.curvature;
+        if (curv && globalScale > 0.55) {
+          const dx = e.x - s.x;
+          const dy = e.y - s.y;
+          ctx.quadraticCurveTo((s.x + e.x) * 0.5 - curv * dy, (s.y + e.y) * 0.5 + curv * dx, e.x, e.y);
+        } else {
+          ctx.lineTo(e.x, e.y);
+        }
+      }
+      ctx.strokeStyle = color;
+      ctx.lineWidth = width;
+      ctx.stroke();
+      if (dashed) ctx.setLineDash([]);
+    };
 
-  const linkWidth = useCallback((link: any) => {
-    const isSelected = selectedLink && (
-      ((selectedLink.source.id || selectedLink.source) === (link.source.id || link.source)) &&
-      ((selectedLink.target.id || selectedLink.target) === (link.target.id || link.target)) &&
-      selectedLink.type === link.type
-    );
-    const isHovered = hoveredLink === link;
+    const isFiltered = Boolean(focusedSubnetwork || activeMetricFilter);
+    const bgColor = activeMetricFilter === 'luecken' ? '#6D28D9' : (isFiltered ? '#94A3B8' : 'rgba(148, 163, 184, 0.34)');
+    const bgWidth = activeMetricFilter === 'luecken' ? 1.8 : (isFiltered ? 1.2 : 0.65);
 
-    if (isSelected || isHovered) return 3.5;
+    strokeBucket(linkBuckets.bg, bgColor, bgWidth);
+    strokeBucket(linkBuckets.donation, '#2563EB', isFiltered ? 1.8 : 1.15);
+    strokeBucket(linkBuckets.dissonance, '#CA8A04', 1.9);
+    strokeBucket(linkBuckets.loot, '#DC2626', isFiltered ? 2.2 : 1.35);
+    strokeBucket(linkBuckets.suspicion, '#0891B2', isFiltered ? 2.3 : 1.75, true);
 
-    // Forensischer Entitaeten-Fokus Kantenstaerke
-    if (focusedSubnetwork) {
-      if (!focusedSubnetwork.linkSet.has(link)) return 0.15;
-      if (link.type === 'RAUBTE' || link.delikt === 'RAUBTE') return 2.8;
-      if (link.type === 'SCHENKTE' || link.type === 'VERKAUFTE_AN') return 2.2;
-      if (link.type === 'VERDACHT_AUF') return 2.5;
-      return 1.6;
+    // Highlight selected edge sharply on top
+    if (selectedLink && selectedLink.source?.x !== undefined && selectedLink.target?.x !== undefined) {
+      const s = selectedLink.source;
+      const e = selectedLink.target;
+      ctx.beginPath();
+      if (selectedLink._isVerdacht) ctx.setLineDash([5, 4]);
+      ctx.moveTo(s.x, s.y);
+      const curv = selectedLink.curvature;
+      if (curv) {
+        const dx = e.x - s.x;
+        const dy = e.y - s.y;
+        ctx.quadraticCurveTo((s.x + e.x) * 0.5 - curv * dy, (s.y + e.y) * 0.5 + curv * dx, e.x, e.y);
+      } else {
+        ctx.lineTo(e.x, e.y);
+      }
+      ctx.strokeStyle = selectedLink._isRaub ? '#991B1B' : (selectedLink._isSchenk ? '#1E40AF' : (selectedLink._isVerdacht ? '#155E75' : '#141413'));
+      ctx.lineWidth = 3.2;
+      ctx.stroke();
+      if (selectedLink._isVerdacht) ctx.setLineDash([]);
     }
+  }, [linkBuckets, canvasDimensions.width, canvasDimensions.height, focusedSubnetwork, activeMetricFilter, selectedLink]);
 
-    if (activeMetricFilter === 'verdacht') {
-      return link.type === 'VERDACHT_AUF' ? 3.0 : 0.3;
-    }
-    if (activeMetricFilter === 'luecken') {
-      const sId = link.source.id || link.source;
-      const tId = link.target.id || link.target;
-      return (gapIds.has(sId) || gapIds.has(tId)) ? 2.4 : 0.3;
-    }
-    if (activeMetricFilter === 'raub') {
-      return (link.type === 'RAUBTE' || link.type === 'ENTEIGNETE') ? 2.4 : 0.4;
-    }
-    if (activeMetricFilter === 'schenkung') {
-      return (link.type === 'SCHENKTE' || link.type === 'VERKAUFTE_AN') ? 2.2 : 0.4;
-    }
-    if (activeMetricFilter === 'dissonanz') {
-      return link.kollision ? 2.4 : 0.5;
-    }
-
-    if (link.type === 'VERDACHT_AUF') return 2.2;
-    if (link.type === 'RAUBTE') return 1.8;
-    if (link.type === 'SCHENKTE') return 1.4;
-    if (link.type === 'LAGERT_IN') return 1.1;
-    return 0.8;
-  }, [activeMetricFilter, gapIds, selectedLink, hoveredLink, focusedSubnetwork]);
-
-  // 9.1 Custom Canvas Rendering fuer gestrichelte VERDACHT_AUF Kanten
-  const linkCanvasObject = useCallback((link: any, ctx: CanvasRenderingContext2D) => {
-    if (link.type !== 'VERDACHT_AUF') return;
-    const start = link.source;
-    const end = link.target;
-    if (!start || !end || typeof start !== 'object' || typeof end !== 'object') return;
-    if (start.x === undefined || end.x === undefined || start.y === undefined || end.y === undefined) return;
-
-    const isSelected = selectedLink && (
-      ((selectedLink.source.id || selectedLink.source) === (link.source.id || link.source)) &&
-      ((selectedLink.target.id || selectedLink.target) === (link.target.id || link.target)) &&
-      selectedLink.type === link.type
-    );
-    const isHovered = hoveredLink === link;
-    const isDimmed = activeMetricFilter && activeMetricFilter !== 'verdacht';
-
-    ctx.save();
+  const nodePointerAreaPaint = useCallback((node: any, color: string, ctx: CanvasRenderingContext2D) => {
+    ctx.fillStyle = color;
     ctx.beginPath();
-    ctx.setLineDash([5, 4]);
-    ctx.moveTo(start.x, start.y);
-    ctx.lineTo(end.x, end.y);
-    ctx.strokeStyle = (isSelected || isHovered) ? '#0E7490' : (isDimmed ? 'rgba(8, 145, 178, 0.15)' : '#0891B2');
-    ctx.lineWidth = (isSelected || isHovered) ? 3.5 : (activeMetricFilter === 'verdacht' ? 3.0 : 2.2);
-    ctx.stroke();
-    ctx.restore();
-  }, [selectedLink, hoveredLink, activeMetricFilter]);
+    ctx.arc(node.x, node.y, 9, 0, 2 * Math.PI, false);
+    ctx.fill();
+  }, []);
+
+  const handleGraphNodeClick = useCallback((node: any) => {
+    setSelectedLink(null);
+    setSelectedRoute(null);
+    setSelectedNode(node);
+    if (fgRef.current) {
+      fgRef.current.centerAt(node.x, node.y, 450);
+      fgRef.current.zoom(2.5, 450);
+    }
+  }, []);
+
+  // Fast on-click geometric hit-testing against batched edges (0ms cost during pan/zoom!)
+  const handleGraphBackgroundClick = useCallback((event: MouseEvent) => {
+    const fg = fgRef.current;
+    const wrap = canvasContainerRef.current;
+    if (fg && wrap && event && fg.screen2GraphCoords) {
+      const rect = wrap.getBoundingClientRect();
+      const pt = fg.screen2GraphCoords(event.clientX - rect.left, event.clientY - rect.top);
+      const scale = typeof fg.zoom === 'function' ? (fg.zoom() || 1) : 1;
+      const hitThreshSq = Math.pow(8 / Math.max(0.25, scale), 2);
+      let bestLink: any = null;
+      let bestDistSq = hitThreshSq;
+
+      for (let i = visibleLinksList.length - 1; i >= 0; i--) {
+        const l = visibleLinksList[i];
+        const s = l.source;
+        const e = l.target;
+        if (!s || !e || s.x === undefined || e.x === undefined) continue;
+        const dx = e.x - s.x;
+        const dy = e.y - s.y;
+        const lenSq = dx * dx + dy * dy;
+        if (lenSq < 1e-4) continue;
+        const t = Math.max(0, Math.min(1, ((pt.x - s.x) * dx + (pt.y - s.y) * dy) / lenSq));
+        const curv = l.curvature || 0;
+        let px: number, py: number;
+        if (curv) {
+          const cpx = (s.x + e.x) * 0.5 - curv * dy;
+          const cpy = (s.y + e.y) * 0.5 + curv * dx;
+          const inv = 1 - t;
+          px = inv * inv * s.x + 2 * inv * t * cpx + t * t * e.x;
+          py = inv * inv * s.y + 2 * inv * t * cpy + t * t * e.y;
+        } else {
+          px = s.x + t * dx;
+          py = s.y + t * dy;
+        }
+        const dSq = (pt.x - px) * (pt.x - px) + (pt.y - py) * (pt.y - py);
+        if (dSq < bestDistSq) {
+          bestDistSq = dSq;
+          bestLink = l;
+        }
+      }
+
+      if (bestLink) {
+        setSelectedNode(null);
+        setSelectedRoute(null);
+        setSelectedLink(bestLink);
+        return;
+      }
+    }
+
+    setSelectedNode(null);
+    setSelectedLink(null);
+    setSelectedRoute(null);
+  }, [visibleLinksList]);
 
   // Details fuer ausgewaehlten Knoten
   const selectedNodeDetails = useMemo(() => {
@@ -3002,57 +3127,34 @@ export default function App() {
             backgroundColor: '#FBFBF9'
           }}
         >
-          {viewMode === 'graph' ? (
-            <div className="graph-canvas-wrap" style={{ width: '100%', height: '100%' }}>
-              <ForceGraph2D
-                ref={fgRef}
-                width={canvasDimensions.width}
-                height={canvasDimensions.height}
-                graphData={graphData}
-                backgroundColor="#FBFBF9"
-                nodeCanvasObject={nodeCanvasObject}
-                nodePointerAreaPaint={(node, color, ctx) => {
-                  ctx.fillStyle = color;
-                  ctx.beginPath();
-                  ctx.arc(node.x, node.y, 9, 0, 2 * Math.PI, false);
-                  ctx.fill();
-                }}
-                linkColor={linkColor}
-                linkWidth={linkWidth}
-                linkCurvature={(link: any) => link.curvature || 0}
-                linkCanvasObjectMode={(link: any) => link.type === 'VERDACHT_AUF' ? 'replace' : undefined}
-                linkCanvasObject={linkCanvasObject}
-                onNodeClick={(node) => {
-                  setSelectedLink(null);
-                  setSelectedRoute(null);
-                  setSelectedNode(node);
-                  if (fgRef.current) {
-                    fgRef.current.centerAt(node.x, node.y, 600);
-                    fgRef.current.zoom(2.5, 600);
-                  }
-                }}
-                onLinkClick={(link) => {
-                  setSelectedNode(null);
-                  setSelectedRoute(null);
-                  setSelectedLink(link);
-                }}
-                onLinkHover={(link) => setHoveredLink(link)}
-                onBackgroundClick={() => {
-                  setSelectedNode(null);
-                  setSelectedLink(null);
-                  setSelectedRoute(null);
-                }}
-                onEngineStop={handleEngineStop}
-                onNodeDragEnd={handleNodeDragEnd}
-                cooldownTicks={graphData.nodes.length > 0 && graphData.nodes[0].fx !== undefined ? 0 : 120}
-                d3AlphaDecay={0.02}
-                d3VelocityDecay={0.3}
-              />
-            </div>
-          ) : viewMode === 'map' ? (
+          {/* Keep ForceGraph2D mounted across tab switches for instant 0ms resume */}
+          <div className="graph-canvas-wrap" style={{ display: viewMode === 'graph' ? 'block' : 'none', width: '100%', height: '100%' }}>
+            <ForceGraph2D
+              ref={fgRef}
+              width={canvasDimensions.width}
+              height={canvasDimensions.height}
+              graphData={graphData}
+              backgroundColor="#FBFBF9"
+              autoPauseRedraw={true}
+              minZoom={0.25}
+              maxZoom={12}
+              nodeCanvasObject={nodeCanvasObject}
+              nodePointerAreaPaint={nodePointerAreaPaint}
+              linkVisibility={hideBuiltInLinks}
+              onRenderFramePre={onRenderFramePre}
+              onNodeClick={handleGraphNodeClick}
+              onBackgroundClick={handleGraphBackgroundClick}
+              onEngineStop={handleEngineStop}
+              onNodeDragEnd={handleNodeDragEnd}
+              cooldownTicks={graphData.nodes.length > 0 && graphData.nodes[0].fx !== undefined ? 0 : 120}
+              d3AlphaDecay={0.02}
+              d3VelocityDecay={0.3}
+            />
+          </div>
+          {viewMode === 'map' ? (
             <GeodataMap
               activeMetricFilter={activeMetricFilter}
-              searchTerm={searchTerm}
+              searchTerm={deferredSearchTerm}
               onSelectNode={(node) => {
                 setSelectedLink(null);
                 setSelectedRoute(null);
@@ -3108,7 +3210,7 @@ export default function App() {
               onRequestLogin={() => { setShowLoginModal(true); setLoginError(t('Researcher authorization required.', 'Forscher-Autorisierung erforderlich.', 'Autorisation chercheur requise.')); }}
               getAuthHeaders={getAuthHeaders}
             />
-          ) : (
+          ) : viewMode === 'visual' ? (
             <VisualForensicsView
               isResearcher={isResearcher}
               getAuthHeaders={getAuthHeaders}
@@ -3127,13 +3229,13 @@ export default function App() {
                 setSelectedNode(found || { id: invId, label: invId, type: 'Subjekt', desc: '' });
                 setTimeout(() => {
                   if (found && fgRef.current && found.x !== undefined) {
-                    fgRef.current.centerAt(found.x, found.y, 700);
-                    fgRef.current.zoom(2.6, 700);
+                    fgRef.current.centerAt(found.x, found.y, 450);
+                    fgRef.current.zoom(2.6, 450);
                   }
-                }, 150);
+                }, 100);
               }}
             />
-          )}
+          ) : null}
 
           {/* Kiosk Mode Floating HUD */}
           {kioskMode && (
@@ -3180,7 +3282,7 @@ export default function App() {
 
           {/* Floating Legende (Unten Links im Canvas) */}
           {viewMode === 'graph' && (
-          <div className="ui-overlay" style={{ position: 'absolute', bottom: 14, left: 14, padding: '7px 12px', backgroundColor: 'rgba(255, 255, 255, 0.94)', border: '1px solid #D8D5CD', borderRadius: '2px', display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap', zIndex: 20, backdropFilter: 'blur(4px)' }}>
+          <div className="ui-overlay" style={{ position: 'absolute', bottom: 14, left: 14, padding: '7px 12px', backgroundColor: 'rgba(255, 255, 255, 0.96)', border: '1px solid #D8D5CD', borderRadius: '2px', display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap', zIndex: 20 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '10.5px', fontWeight: 500, color: '#3F3E3A' }}>
               <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#141413', display: 'inline-block' }}></span>
               {t('Depot', 'Depot', 'Dépôt')}
